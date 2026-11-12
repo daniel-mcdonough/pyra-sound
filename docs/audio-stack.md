@@ -2,7 +2,19 @@
 
 Source: `../dragonbox-pyra/docs/audio.md` (the upstream reference), `../pyra-kernel/sound/soc/codecs/twl6040.c`,
 `../pyra-hacks/pyra_volumed.c`, `../dragonbox-pyra/device/pulse/`. Facts here were collected from those files on
-2026-11-12, not yet re-checked on a running unit. Mark each one "verified on <kernel>, <date>" once it is.
+2026-11-12. Ones checked on the device (`ssh pyra-release`) say so.
+
+## The test unit (verified 2026-11-12)
+
+- `pyra-release`: kernel `5.6.19-m4-kbdled`, AESS path, Debian trixie. L15 happened to be card 4.
+- PA: one sink `aess` (`module-alsa-card.c`). Ports `pyra-speaker` (priority 10000, availability unknown) and
+  `pyra-headphones` (priority 9000, "not available" with nothing plugged in). Active port `pyra-speaker`.
+- Readings at the time: Handsfree 21,21; Headset 13,13.
+- `pyra_volumed` runs as `/usr/local/bin/pyra_volumed` (not from a package; the unit has a drop-in in
+  `/etc/systemd/system/pyra_volumed.service.d`).
+- `mate-volume-control-status-icon` is running.
+- Installed: `alsa-utils`, `pulseaudio-utils`. Not installed but in the archive: `python3-alsaaudio` 0.10.0,
+  `python3-pulsectl` 24.12.0.
 
 ## Card L15 and the TWL6040 controls
 
@@ -48,7 +60,9 @@ Which one is running depends on the kernel:
 
 ## Headphone jack detection
 
-- ALSA jack kctls `Headset Stereophone Jack`, `Headset Mic Jack`; input device `Letux Cortex 15 Headset Jack`
+- ALSA jack kctls `Headset Stereophone Jack` (numid 37), `Headset Mic Jack` (36). They are `iface=CARD`, so
+  `amixer cget name=...` alone doesn't find them: use `amixer -c L15 cget iface=CARD,name='Headset Stereophone Jack'`
+  (verified 2026-11-12); input device `Letux Cortex 15 Headset Jack`
   reporting `SW_HEADPHONE_INSERT`.
 - Stock kernels: always reads "inserted" (the TWL6040's detect is stuck; the real detector, a TS3A227E, never
   probes). Fixed only in `5.6.19-m4-kbdled` (patches 0037-0039 in `../dragonbox-pyra/experiments/jack-detect/`).
