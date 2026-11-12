@@ -17,6 +17,9 @@ Source: `../dragonbox-pyra/docs/audio.md` (the upstream reference), `../pyra-ker
 
 ## Two kernel paths, two PulseAudio layouts
 
+This project supports **AESS only** (decided 2026-11-12). The direct column is kept so a direct kernel can be
+recognised and reported as unsupported.
+
 Which one is running depends on the kernel:
 
     grep -q 'MultiMedia1 LP' /proc/asound/pcm && echo AESS || echo direct
