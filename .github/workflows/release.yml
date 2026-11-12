@@ -1,0 +1,40 @@
+# Build the .deb and publish it as a GitHub release when a v* tag is pushed.
+#
+#   git tag -a v0.1 -m "pyra-sound 0.1" && git push origin v0.1
+#
+# The tag must match the top entry of debian/changelog, so bump that first.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches debian/changelog
+        run: |
+          version=$(sed -n '1s/.*(\(.*\)).*/\1/p' debian/changelog)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match changelog version $version"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: ./build-deb.sh
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/pyra-sound_${VERSION}_all.deb" \
+            --title "pyra-sound $VERSION" \
+            --notes "Install with: sudo apt install ./pyra-sound_${VERSION}_all.deb"

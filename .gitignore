@@ -3,3 +3,4 @@ CLAUDE.md
 logs/claude-loop/
 STOP
 dist/
+__pycache__/

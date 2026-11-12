@@ -1,0 +1,5 @@
+pyra-sound (0.1) trixie; urgency=medium
+
+  * Initial release: a tray icon that mutes the sound on left click.
+
+ -- pyra-sound maintainers <pyra-sound@example.invalid>  Thu, 12 Nov 2026 12:00:00 +0000

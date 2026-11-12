@@ -1,0 +1,131 @@
+#!/usr/bin/python3
+#
+# pyra-sound — a sound icon for the MATE Notification Area on the DragonBox
+# Pyra. Runs as the logged-in user, needs no root.
+#
+# WHY THIS EXISTS
+#
+# The Pyra's volume wheel only drives the speaker amp, and its headphone jack
+# can't report an unplug, so MATE's own sound icon can neither carry the wheel
+# over to the headphones nor switch back to the speakers by itself. This icon
+# does both by hand (see docs/audio-stack.md in the source tree).
+#
+# USING IT
+#
+#   left click               mute / unmute
+#
+# It talks to PulseAudio through pactl, on the AESS kernels' single sink
+# "aess". On a kernel with the direct McPDM path it says "unsupported" on
+# stderr and exits without an icon.
+#
+# INSTALLING
+#
+# The pyra-sound package starts it at login from /etc/xdg/autostart. Only one
+# copy runs: a second start finds the first on the session bus and exits.
+#
+# Copyright (C) 2026 the pyra-sound authors
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+import sys
+import warnings
+
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gio, GLib, Gtk
+
+# Gtk.StatusIcon is deprecated in GTK 3, but it is what MATE's Notification
+# Area shows, and the icon this one replaces uses it too.
+warnings.filterwarnings("ignore", message="Gtk.StatusIcon", category=DeprecationWarning)
+
+APP_ID = "org.pyra.Sound"
+SINK = "aess"
+
+ICON_MUTED = "audio-volume-muted-symbolic"
+ICON_ON = "audio-volume-high-symbolic"
+
+
+def log(msg):
+    print(f"pyra-sound: {msg}", file=sys.stderr, flush=True)
+
+
+def aess_kernel():
+    """True on the AESS path. Its front end shows up as a "MultiMedia1 LP"
+    PCM; the direct McPDM path has no such device."""
+    try:
+        with open("/proc/asound/pcm") as f:
+            return "MultiMedia1 LP" in f.read()
+    except OSError:
+        return False
+
+
+def run(argv, done=None):
+    """Run a command without blocking the main loop. done(ok, stdout) is
+    called when it finishes."""
+    try:
+        proc = Gio.Subprocess.new(
+            argv, Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE)
+    except GLib.Error as e:
+        log(f"{argv[0]}: {e.message}")
+        if done:
+            done(False, "")
+        return
+
+    def finished(proc, result):
+        try:
+            _, out, err = proc.communicate_utf8_finish(result)
+        except GLib.Error as e:
+            log(f"{argv[0]}: {e.message}")
+            out, err = "", ""
+        ok = proc.get_successful()
+        if not ok and err:
+            log(f"{' '.join(argv)}: {err.strip()}")
+        if done:
+            done(ok, out or "")
+
+    proc.communicate_utf8_async(None, None, finished)
+
+
+class PyraSound(Gtk.Application):
+
+    def __init__(self):
+        super().__init__(application_id=APP_ID)
+        self.icon = None
+
+    def do_startup(self):
+        Gtk.Application.do_startup(self)
+        # No windows, so keep the application alive by hand.
+        self.hold()
+        self.icon = Gtk.StatusIcon(title="Sound")
+        self.icon.connect("activate", self.on_activate)
+        self.show_mute(False)
+        self.refresh()
+
+    def do_activate(self):
+        # A second start lands here, in the first process. Nothing to do.
+        pass
+
+    def on_activate(self, _icon):
+        run(["pactl", "set-sink-mute", SINK, "toggle"],
+            lambda ok, out: self.refresh())
+
+    def refresh(self):
+        def got(ok, out):
+            if ok:
+                self.show_mute(out.strip().endswith("yes"))
+        run(["pactl", "get-sink-mute", SINK], got)
+
+    def show_mute(self, muted):
+        self.icon.set_from_icon_name(ICON_MUTED if muted else ICON_ON)
+        self.icon.set_tooltip_text("Sound: muted" if muted else "Sound: on")
+
+
+def main():
+    if not aess_kernel():
+        log("unsupported: this kernel uses the direct McPDM audio path; "
+            "pyra-sound needs an AESS kernel (5.6.19-m4*)")
+        return 0
+    return PyraSound().run(sys.argv)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

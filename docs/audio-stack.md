@@ -44,6 +44,9 @@ Which one is running depends on the kernel:
 | PA card | `alsa_card.L15` | none (bare `module-alsa-sink`) |
 
 - PA volume is software volume on both paths. Changing a PA sink volume does not touch the ALSA volume controls.
+- Mute on AESS: `pactl set-sink-mute aess toggle`; read back with `pactl get-sink-mute aess`, which prints
+  `Mute: yes` / `Mute: no` (PA protocol 35 on the test unit). Used by pyra-sound's left click, verified
+  2026-11-12 by clicking the tray icon.
 - On the direct path, muting one remap sink leaves the other playing. Mute the master sink instead.
 - On AESS, `module-switch-on-port-available` is loaded, and the headphones port has `[Jack Headset Stereophone]
   required-any`. Untested: whether PA refuses or reverts a manual switch to an "unavailable" port.

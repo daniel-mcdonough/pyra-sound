@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Pyra Sound
+Comment=Sound icon for the DragonBox Pyra: mute, speakers or headphones
+Exec=pyra-sound
+Icon=audio-volume-high
+Terminal=false
+NoDisplay=true
+OnlyShowIn=MATE;
+X-MATE-Autostart-Notify=false

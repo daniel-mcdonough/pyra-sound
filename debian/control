@@ -1,0 +1,24 @@
+Source: pyra-sound
+Section: sound
+Priority: optional
+Maintainer: pyra-sound maintainers <pyra-sound@example.invalid>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+
+Package: pyra-sound
+Architecture: all
+Depends: ${misc:Depends},
+         python3,
+         python3-gi,
+         gir1.2-glib-2.0,
+         gir1.2-gtk-3.0,
+         pulseaudio-utils,
+         alsa-utils
+Description: sound tray icon for the DragonBox Pyra
+ A sound icon for MATE's Notification Area, meant to take the place of
+ mate-volume-control-status-icon on the Pyra. Left click mutes and
+ unmutes the sound.
+ .
+ It works with the Pyra's AESS kernels (5.6.19-m4*) only and needs no
+ root: everything goes through PulseAudio as the logged-in user.
