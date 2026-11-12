@@ -80,3 +80,7 @@ Which one is running depends on the kernel:
   `pyra-backlight.layout`). It is an ordinary tray icon; nothing about it is special.
 - `pyra-sound` replaces it: our autostart entry adds a tray icon, and a per-user override with `Hidden=true` stops
   MATE's from starting (NEXT 1.4).
+- Its icons are the full-colour theme names `audio-volume-muted` / `-low` / `-medium` / `-high` (from the
+  binary's strings; theme `mate`), not the `-symbolic` ones, chosen by PA sink volume in thirds of 100%. pyra-sound
+  uses the same names and rule (`icon_for()`); the user confirmed both look identical 2026-11-12. On AESS the sink
+  volume normally sits at 100% (the wheel moves ALSA, not PA), so it shows "high" unless muted.

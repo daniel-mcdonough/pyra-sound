@@ -40,8 +40,17 @@ warnings.filterwarnings("ignore", message="Gtk.StatusIcon", category=Deprecation
 APP_ID = "org.pyra.Sound"
 SINK = "aess"
 
-ICON_MUTED = "audio-volume-muted-symbolic"
-ICON_ON = "audio-volume-high-symbolic"
+# The same full-colour theme icons mate-volume-control-status-icon uses, so
+# this one looks like the icon it replaces. MATE picks one of the three by the
+# sink volume in thirds of 100%; icon_for() does the same.
+ICONS = ("audio-volume-muted", "audio-volume-low",
+         "audio-volume-medium", "audio-volume-high")
+
+
+def icon_for(muted, percent):
+    if muted or percent <= 0:
+        return ICONS[0]
+    return ICONS[min(3, max(1, percent * 3 // 100 + 1))]
 
 
 def log(msg):
@@ -97,7 +106,7 @@ class PyraSound(Gtk.Application):
         self.hold()
         self.icon = Gtk.StatusIcon(title="Sound")
         self.icon.connect("activate", self.on_activate)
-        self.show_mute(False)
+        self.show(False, 100)
         self.refresh()
 
     def do_activate(self):
@@ -109,14 +118,26 @@ class PyraSound(Gtk.Application):
             lambda ok, out: self.refresh())
 
     def refresh(self):
-        def got(ok, out):
+        # "Mute: yes", then "Volume: front-left: 65536 / 100% / 0.00 dB, ..."
+        def got_volume(muted, ok, out):
+            percent = 100
             if ok:
-                self.show_mute(out.strip().endswith("yes"))
-        run(["pactl", "get-sink-mute", SINK], got)
+                try:
+                    percent = int(out.split("/")[1].strip().rstrip("%"))
+                except (IndexError, ValueError):
+                    log(f"can't read the volume from: {out.strip()}")
+            self.show(muted, percent)
 
-    def show_mute(self, muted):
-        self.icon.set_from_icon_name(ICON_MUTED if muted else ICON_ON)
-        self.icon.set_tooltip_text("Sound: muted" if muted else "Sound: on")
+        def got_mute(ok, out):
+            if ok:
+                muted = out.strip().endswith("yes")
+                run(["pactl", "get-sink-volume", SINK],
+                    lambda ok, out: got_volume(muted, ok, out))
+        run(["pactl", "get-sink-mute", SINK], got_mute)
+
+    def show(self, muted, percent):
+        self.icon.set_from_icon_name(icon_for(muted, percent))
+        self.icon.set_tooltip_text("Sound: muted" if muted else f"Sound: {percent}%")
 
 
 def main():
