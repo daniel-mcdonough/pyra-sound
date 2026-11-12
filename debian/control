@@ -18,7 +18,8 @@ Depends: ${misc:Depends},
 Description: sound tray icon for the DragonBox Pyra
  A sound icon for MATE's Notification Area, meant to take the place of
  mate-volume-control-status-icon on the Pyra. Left click mutes and
- unmutes the sound.
+ unmutes the sound; right click opens a small window to switch between
+ the speakers and the headphones and to set the headphone volume.
  .
  It works with the Pyra's AESS kernels (5.6.19-m4*) only and needs no
  root: everything goes through PulseAudio as the logged-in user.

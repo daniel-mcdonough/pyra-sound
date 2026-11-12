@@ -13,6 +13,8 @@
 # USING IT
 #
 #   left click               mute / unmute
+#   right click              output (speakers / headphones) and the
+#                            headphone volume
 #
 # It talks to PulseAudio through pactl, on the AESS kernels' single sink
 # "aess". On a kernel with the direct McPDM path it says "unsupported" on
@@ -26,12 +28,14 @@
 # Copyright (C) 2026 the pyra-sound authors
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
+import json
 import sys
 import warnings
 
 import gi
+gi.require_version("Gdk", "3.0")
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gio, GLib, Gtk
+from gi.repository import Gdk, Gio, GLib, Gtk
 
 # Gtk.StatusIcon is deprecated in GTK 3, but it is what MATE's Notification
 # Area shows, and the icon this one replaces uses it too.
@@ -39,6 +43,14 @@ warnings.filterwarnings("ignore", message="Gtk.StatusIcon", category=Deprecation
 
 APP_ID = "org.pyra.Sound"
 SINK = "aess"
+SPEAKER, HEADPHONES = "pyra-speaker", "pyra-headphones"
+PORT_NAMES = {SPEAKER: "speakers", HEADPHONES: "headphones"}
+
+# The headphone amp's volume, 0..15 (-30..0 dB). pyra_volumed never writes it.
+# Never write "Handsfree Playback Volume": pyra_volumed owns that one.
+CARD = "L15"
+HEADSET_VOLUME = "Headset Playback Volume"
+HEADSET_MAX = 15
 
 # The same full-colour theme icons mate-volume-control-status-icon uses, so
 # this one looks like the icon it replaces. MATE picks one of the three by the
@@ -99,6 +111,7 @@ class PyraSound(Gtk.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID)
         self.icon = None
+        self.popup = None
 
     def do_startup(self):
         Gtk.Application.do_startup(self)
@@ -106,6 +119,8 @@ class PyraSound(Gtk.Application):
         self.hold()
         self.icon = Gtk.StatusIcon(title="Sound")
         self.icon.connect("activate", self.on_activate)
+        self.icon.connect("popup-menu", self.on_popup_menu)
+        self.popup = Popup(self)
         self.show(False, 100)
         self.refresh()
 
@@ -117,27 +132,181 @@ class PyraSound(Gtk.Application):
         run(["pactl", "set-sink-mute", SINK, "toggle"],
             lambda ok, out: self.refresh())
 
+    def on_popup_menu(self, _icon, _button, _time):
+        if self.popup.get_visible():
+            self.popup.close()
+        else:
+            self.popup.open()
+
+    def set_port(self, port):
+        run(["pactl", "set-sink-port", SINK, port], lambda ok, out: self.refresh())
+
     def refresh(self):
-        # "Mute: yes", then "Volume: front-left: 65536 / 100% / 0.00 dB, ..."
-        def got_volume(muted, ok, out):
-            percent = 100
-            if ok:
-                try:
-                    percent = int(out.split("/")[1].strip().rstrip("%"))
-                except (IndexError, ValueError):
-                    log(f"can't read the volume from: {out.strip()}")
-            self.show(muted, percent)
+        """Read mute, volume and the active port back from PulseAudio and show
+        them. PA is the only record of the state; MATE's sound preferences or
+        pactl can change it behind our back."""
+        def got_sinks(ok, out):
+            if not ok:
+                return
+            try:
+                sink = next(s for s in json.loads(out) if s["name"] == SINK)
+                percent = int(next(iter(sink["volume"].values()))
+                              ["value_percent"].rstrip("%"))
+                muted, port = sink["mute"], sink["active_port"]
+            except (ValueError, KeyError, StopIteration, AttributeError) as e:
+                log(f"can't read sink {SINK} from pactl: {e!r}")
+                return
+            self.show(muted, percent, port)
+        run(["pactl", "-f", "json", "list", "sinks"], got_sinks)
 
-        def got_mute(ok, out):
-            if ok:
-                muted = out.strip().endswith("yes")
-                run(["pactl", "get-sink-volume", SINK],
-                    lambda ok, out: got_volume(muted, ok, out))
-        run(["pactl", "get-sink-mute", SINK], got_mute)
-
-    def show(self, muted, percent):
+    def show(self, muted, percent, port=None):
         self.icon.set_from_icon_name(icon_for(muted, percent))
-        self.icon.set_tooltip_text("Sound: muted" if muted else f"Sound: {percent}%")
+        text = "Sound: muted" if muted else f"Sound: {percent}%"
+        if port in PORT_NAMES:
+            text += f", {PORT_NAMES[port]}"
+            self.popup.show_port(port)
+        self.icon.set_tooltip_text(text)
+
+
+class Popup(Gtk.Window):
+    """The right-click window: output choice and the headphone volume.
+
+    A window rather than a Gtk.Menu, because a Gtk.Scale inside a menu item
+    doesn't get its drags; MATE's own sound icon pops up a window too. It
+    grabs the pointer and closes on a click outside it or on Escape."""
+
+    def __init__(self, app):
+        super().__init__(type=Gtk.WindowType.POPUP)
+        self.app = app
+        self.updating = False     # set while we move the widgets ourselves
+        self.hs_pending = None    # headset value waiting to be written
+        self.hs_busy = False      # an amixer write is running
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6,
+                      border_width=10)
+        self.speaker = Gtk.RadioButton.new_with_label(None, "Speakers")
+        self.headphones = Gtk.RadioButton.new_with_label_from_widget(
+            self.speaker, "Headphones")
+        for button, port in ((self.speaker, SPEAKER), (self.headphones, HEADPHONES)):
+            button.connect("toggled", self.on_port_toggled, port)
+            box.pack_start(button, False, False, 0)
+        box.pack_start(Gtk.Separator(), False, False, 2)
+        box.pack_start(Gtk.Label(label="Headphone volume", xalign=0), False, False, 0)
+        self.scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 0, HEADSET_MAX, 1)
+        self.scale.set_size_request(200, -1)
+        self.scale.set_value_pos(Gtk.PositionType.RIGHT)
+        self.scale.connect("format-value",
+                           lambda _s, v: f"{round(v * 100 / HEADSET_MAX)}%")
+        self.scale.connect("value-changed", self.on_scale_changed)
+        box.pack_start(self.scale, False, False, 0)
+
+        frame = Gtk.Frame(shadow_type=Gtk.ShadowType.OUT)
+        frame.add(box)
+        self.add(frame)
+        frame.show_all()
+
+        self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.KEY_PRESS_MASK)
+        self.connect("button-press-event", self.on_button_press)
+        self.connect("key-press-event", self.on_key_press)
+        self.connect("grab-broken-event", lambda *a: self.close())
+        self.connect("delete-event", lambda *a: self.hide() or True)
+
+    def open(self):
+        self.app.refresh()
+        self.read_headset()
+        self.place()
+        self.show()
+        seat = Gdk.Display.get_default().get_default_seat()
+        status = seat.grab(self.get_window(), Gdk.SeatCapabilities.ALL, True,
+                           None, None, None, None)
+        if status != Gdk.GrabStatus.SUCCESS:
+            log(f"popup: can't grab the pointer ({status.value_nick})")
+
+    def close(self):
+        if self.get_visible():
+            Gdk.Display.get_default().get_default_seat().ungrab()
+            self.hide()
+
+    def place(self):
+        """Next to the tray icon: below it on a top panel, above it on a
+        bottom one, kept on the monitor."""
+        size = self.get_preferred_size()[1]
+        width, height = size.width, size.height
+        ok, _screen, area, _orient = self.app.icon.get_geometry()
+        if not ok:
+            self.set_position(Gtk.WindowPosition.MOUSE)
+            return
+        work = Gdk.Display.get_default().get_monitor_at_point(
+            area.x, area.y).get_workarea()
+        x = area.x + area.width // 2 - width // 2
+        x = max(work.x, min(x, work.x + work.width - width))
+        if area.y < work.y + work.height // 2:
+            y = area.y + area.height
+        else:
+            y = area.y - height
+        self.move(x, y)
+
+    def on_button_press(self, _win, event):
+        # With the grab, clicks anywhere on screen arrive here. Ours have
+        # already gone to the widgets under them; close on any other.
+        ox, oy = self.get_window().get_origin()[1:]
+        width, height = self.get_size()
+        if not (ox <= event.x_root < ox + width and oy <= event.y_root < oy + height):
+            self.close()
+            return True
+        return False
+
+    def on_key_press(self, _win, event):
+        if event.keyval == Gdk.KEY_Escape:
+            self.close()
+            return True
+        return False
+
+    def show_port(self, port):
+        self.updating = True
+        (self.headphones if port == HEADPHONES else self.speaker).set_active(True)
+        self.updating = False
+
+    def on_port_toggled(self, button, port):
+        if button.get_active() and not self.updating:
+            self.app.set_port(port)
+
+    def read_headset(self):
+        # "  : values=13,13"
+        def got(ok, out):
+            for line in out.splitlines():
+                if line.strip().startswith(": values="):
+                    try:
+                        value = int(line.split("=")[1].split(",")[0])
+                    except ValueError:
+                        break
+                    self.updating = True
+                    self.scale.set_value(value)
+                    self.updating = False
+                    return
+            log(f"can't read {HEADSET_VOLUME}: {out.strip()}")
+        run(["amixer", "-c", CARD, "cget", f"name={HEADSET_VOLUME}"], got)
+
+    def on_scale_changed(self, scale):
+        if self.updating:
+            return
+        # A drag fires many changes; run one amixer at a time and send only
+        # the latest value when it finishes.
+        self.hs_pending = round(scale.get_value())
+        if not self.hs_busy:
+            self.write_headset()
+
+    def write_headset(self):
+        value, self.hs_pending = self.hs_pending, None
+        self.hs_busy = True
+
+        def done(ok, out):
+            self.hs_busy = False
+            if self.hs_pending is not None:
+                self.write_headset()
+        run(["amixer", "-q", "-c", CARD, "cset", f"name={HEADSET_VOLUME}",
+             str(value)], done)
 
 
 def main():
