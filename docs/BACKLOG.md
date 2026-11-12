@@ -15,6 +15,3 @@ do this on AESS; check before writing anything. Unplug can't be detected (hardwa
 Scrolling can't move the wheel's volume (`pyra_volumed` overwrites Handsfree). It could change the PA sink volume
 instead, but then there are two volumes in series. Decide whether that's worth it.
 
-### 2.3 Coexistence with MATE's own sound status icon
-
-`mate-volume-control-status-icon` also shows mute and volume. Decide whether the README tells users to turn it off.

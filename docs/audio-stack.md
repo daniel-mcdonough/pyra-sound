@@ -1,4 +1,4 @@
-# Pyra audio stack, as the applet sees it
+# Pyra audio stack, as pyra-sound sees it
 
 Source: `../dragonbox-pyra/docs/audio.md` (the upstream reference), `../pyra-kernel/sound/soc/codecs/twl6040.c`,
 `../pyra-hacks/pyra_volumed.c`, `../dragonbox-pyra/device/pulse/`. Facts here were collected from those files on
@@ -53,4 +53,13 @@ Which one is running depends on the kernel:
 - Stock kernels: always reads "inserted" (the TWL6040's detect is stuck; the real detector, a TS3A227E, never
   probes). Fixed only in `5.6.19-m4-kbdled` (patches 0037-0039 in `../dragonbox-pyra/experiments/jack-detect/`).
 - Even with the fix, **unplug is not detected while the headset amp is powered**. That is a hardware limit, so
-  there's no automatic switch back to the speakers. This is why the applet switches by hand on right click.
+  there's no automatic switch back to the speakers. This is why pyra-sound switches by hand on right click.
+
+## MATE's sound icon: mate-volume-control-status-icon
+
+- From `mate-media`, pulled in by `mate-desktop-environment` (dependency of `pyra-meta-mate`). Started by
+  `/etc/xdg/autostart/mate-volume-control-status-icon.desktop` and shown in the panel's Notification Area
+  (`NotificationAreaAppletFactory::NotificationArea`, right-stuck at position 3 in the image's
+  `pyra-backlight.layout`). It is an ordinary tray icon; nothing about it is special.
+- `pyra-sound` replaces it: our autostart entry adds a tray icon, and a per-user override with `Hidden=true` stops
+  MATE's from starting (NEXT 1.4).
