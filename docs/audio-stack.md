@@ -109,8 +109,14 @@ Which one is running depends on the kernel:
   `/etc/xdg/autostart/mate-volume-control-status-icon.desktop` and shown in the panel's Notification Area
   (`NotificationAreaAppletFactory::NotificationArea`, right-stuck at position 3 in the image's
   `pyra-backlight.layout`). It is an ordinary tray icon; nothing about it is special.
-- `pyra-sound` replaces it: our autostart entry adds a tray icon, and a per-user override with `Hidden=true` stops
-  MATE's from starting (NEXT 1.4).
+- Its autostart file belongs to `mate-media-common` (a conffile) and has no `AutostartCondition`, so no gsettings
+  key turns it off (checked 2026-11-13).
+- The session's `XDG_CONFIG_DIRS` is `/etc/xdg/pyra:/etc/xdg`, set by `pyra-config-desktop`'s
+  `/etc/X11/Xsession.d/65pyra_xdg-config` (seen in mate-panel's environment 2026-11-13). A same-named file in
+  `/etc/xdg/pyra/autostart` masks MATE's.
+- `pyra-sound` replaces it: our autostart entry adds a tray icon, and the package's mask (`Hidden=true`, shipped as
+  a symlink so `apt remove` deletes it) stops MATE's from starting (NEXT 1.4). Untested until 1.4: that
+  mate-session honours the mask.
 - Its icons are the full-colour theme names `audio-volume-muted` / `-low` / `-medium` / `-high` (from the
   binary's strings; theme `mate`), not the `-symbolic` ones, chosen by PA sink volume in thirds of 100%. pyra-sound
   uses the same names and rule (`icon_for()`); the user confirmed both look identical 2026-11-12. On AESS the sink
