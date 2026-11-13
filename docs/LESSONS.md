@@ -27,3 +27,19 @@ The MATE session is on `:0`. `export DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:pa
 The host is Arch. Inspect the .deb in the container:
 `docker run --rm -v "$PWD/dist:/d:ro" debian:trixie dpkg-deb -c /d/pyra-sound_0.1_all.deb`. The locally cached
 `debian:trixie` image is linux/arm/v7 (emulated); `build-deb.sh` works with it anyway.
+
+## `ssh pyra-release '... setsid -f ...'` never returns
+
+A child started with `setsid -f` that keeps the ssh session's stdout open holds the ssh command until the tool
+timeout. Redirect the child's output inside its `sh -c` and give ssh `</dev/null`, or run the ssh in the background.
+
+## Killing a test `alsactl monitor` also kills pyra-sound's
+
+`pkill -f 'alsactl monitor hw:L15'` matches pyra-sound's own monitor too. pyra-sound restarts it after 5 s, but
+kill test monitors by PID or by their parent shell instead.
+
+## `./build-deb.sh`: "failed to connect to the docker API"
+
+The Docker daemon isn't started on the host by default, and starting it needs the user's sudo password: ask them to
+run `! sudo systemctl start docker`. For a script-only change, `scp` + `sudo install -m755` over
+`/usr/bin/pyra-sound` on the Pyra tests the same code.
