@@ -49,7 +49,12 @@ Which one is running depends on the kernel:
   2026-11-12 by clicking the tray icon.
 - On the direct path, muting one remap sink leaves the other playing. Mute the master sink instead.
 - On AESS, `module-switch-on-port-available` is loaded, and the headphones port has `[Jack Headset Stereophone]
-  required-any`. Untested: whether PA refuses or reverts a manual switch to an "unavailable" port.
+  required-any`. A manual switch to it is still accepted while it reads "not available" with nothing plugged in:
+  `pactl set-sink-port aess pyra-headphones` exits 0 and `Active Port` stays `pyra-headphones` (checked after 3 s);
+  the module doesn't revert it (verified 2026-11-13). pyra-sound's right-click window relies on this.
+- The port paths route exclusively (verified 2026-11-13): `pyra-headphones` sets `Headset Left Playback` = HS DAC
+  and `Handsfree Left Playback` = Off; `pyra-speaker` the reverse. So after the first switch, the boot state "both
+  amps on" (from `pyra-audio-route-apply`) is gone, and only one output plays.
 
 ## Volume wheel: pyra_volumed
 
@@ -60,6 +65,32 @@ Which one is running depends on the kernel:
 - So for this project the Handsfree volume is the wheel's position, read-only, and the headphone volume has to be
   derived from it: watch Handsfree, write `Headset Playback Volume`. The two ranges differ (30 vs 16 steps,
   -52..+6 vs -30..0 dB), so a mapping has to be chosen.
+
+### Wheel to headphones mapping
+
+- Decided 2026-11-13: **linear step map**, `headset = round(handsfree * 15 / 29)` (`headset_for()` in
+  `src/pyra-sound`). The whole wheel travel moves the headphones, from -30 dB at the bottom to 0 dB at the top,
+  about 2 dB of headphone per 4 dB of speaker. The alternative, matching dB and clamping, leaves the bottom
+  (below -30 dB) and top (above 0 dB) of the wheel dead: about a third of the travel does nothing.
+- Wheel position at the bottom (HF 0) gives HS 0 = -30 dB, quiet but not silent. The TWL6040's Headset volume has
+  no mute step; use left click (PA mute) for silence.
+- Change detection: `/usr/sbin/alsactl monitor hw:L15` (not on a user's PATH) prints one line per control change,
+  e.g. `node hw:L15, #30 (2,0,0,Handsfree Playback Volume,0) VALUE`, and flushes per line into a pipe. A write
+  of the same value produces no event, so `pyra_volumed`'s rewrites of an unchanged position don't wake
+  pyra-sound (verified 2026-11-13).
+- pyra-sound copies only while PA's active port is `pyra-headphones` (read from PA on each event), and copies
+  at once when the port becomes the headphones. A port switch from outside (pactl, MATE's preferences) shows up
+  as a `Headset Left Playback` route event in the same monitor, so pyra-sound re-reads PA on that too.
+- Verified on the unit 2026-11-13, with the user listening: the wheel from bottom to top and back gives HS 0..15
+  in step with HF, never going backwards, sometimes one event behind; HS stays put while the speakers are
+  selected.
+- HF never reads 1..5 on the unit: the wheel's bottom stop gives 0 and the next position about 6-7, and the top
+  jumps 26 → 29. That fits dragonbox-pyra's rewritten `pyra_volumed` (`device/pyra-volumed/pyra_volumed.c`,
+  `STEP_LO 6`, 0 only at `RAW_OFF`). So the HF-based mapping never reaches HS 1..3.
+- Planned (NEXT 1.8): move this into `pyra_volumed`. The daemon would write `Headset Playback Volume` from its
+  wheel `travel()` on every change, with no port check (the port paths route exclusively, so the headphone volume
+  only matters while it is routed). One ioctl instead of three subprocesses per step, all 16 steps reachable,
+  works without a session. Then the applet's mirror goes.
 
 ## Headphone jack detection
 

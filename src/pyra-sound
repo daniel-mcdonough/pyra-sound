@@ -15,6 +15,8 @@
 #   left click               mute / unmute
 #   right click              output (speakers / headphones) and the
 #                            headphone volume
+#   volume wheel             with the headphones selected, the headphones
+#                            follow it too (it only drives the speakers)
 #
 # It talks to PulseAudio through pactl, on the AESS kernels' single sink
 # "aess". On a kernel with the direct McPDM path it says "unsupported" on
@@ -29,6 +31,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
 import json
+import signal
 import sys
 import warnings
 
@@ -51,6 +54,34 @@ PORT_NAMES = {SPEAKER: "speakers", HEADPHONES: "headphones"}
 CARD = "L15"
 HEADSET_VOLUME = "Headset Playback Volume"
 HEADSET_MAX = 15
+
+# The wheel's position: pyra_volumed writes it to the speaker amp's volume,
+# 0..29 (-52..+6 dB), on every move. We only read it.
+HANDSFREE_VOLUME = "Handsfree Playback Volume"
+HANDSFREE_MAX = 29
+
+# A route mux that the PA port paths flip on every switch between the
+# speakers and the headphones (docs/audio-stack.md, "Two kernel paths").
+HEADSET_ROUTE = "Headset Left Playback"
+
+
+def headset_for(handsfree):
+    """The wheel position mapped linearly onto the headphone volume steps, so
+    the whole wheel travel moves the headphones (docs/audio-stack.md,
+    "Wheel to headphones mapping")."""
+    return round(handsfree * HEADSET_MAX / HANDSFREE_MAX)
+
+
+def amixer_value(out):
+    """The first channel's value from amixer cget output ("  : values=13,13"),
+    or None."""
+    for line in out.splitlines():
+        if line.strip().startswith(": values="):
+            try:
+                return int(line.split("=")[1].split(",")[0])
+            except ValueError:
+                return None
+    return None
 
 # The same full-colour theme icons mate-volume-control-status-icon uses, so
 # this one looks like the icon it replaces. MATE picks one of the three by the
@@ -112,6 +143,10 @@ class PyraSound(Gtk.Application):
         super().__init__(application_id=APP_ID)
         self.icon = None
         self.popup = None
+        self.port = None          # last port seen, to notice a switch
+        self.monitor = None       # the alsactl monitor process
+        self.mirror_busy = False  # a wheel-to-headphones copy is running
+        self.mirror_again = False # the wheel moved during it
 
     def do_startup(self):
         Gtk.Application.do_startup(self)
@@ -123,6 +158,18 @@ class PyraSound(Gtk.Application):
         self.popup = Popup(self)
         self.show(False, 100)
         self.refresh()
+        self.watch_mixer()
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, self.on_signal)
+
+    def do_shutdown(self):
+        if self.monitor:
+            self.monitor.force_exit()
+        Gtk.Application.do_shutdown(self)
+
+    def on_signal(self):
+        self.quit()
+        return GLib.SOURCE_REMOVE
 
     def do_activate(self):
         # A second start lands here, in the first process. Nothing to do.
@@ -141,10 +188,13 @@ class PyraSound(Gtk.Application):
     def set_port(self, port):
         run(["pactl", "set-sink-port", SINK, port], lambda ok, out: self.refresh())
 
-    def refresh(self):
+    def refresh(self, wheel_moved=False):
         """Read mute, volume and the active port back from PulseAudio and show
         them. PA is the only record of the state; MATE's sound preferences or
-        pactl can change it behind our back."""
+        pactl can change it behind our back.
+
+        With the headphones port active, copy the wheel to the headphones if
+        the wheel moved or the port has just become the headphones."""
         def got_sinks(ok, out):
             if not ok:
                 return
@@ -157,7 +207,68 @@ class PyraSound(Gtk.Application):
                 log(f"can't read sink {SINK} from pactl: {e!r}")
                 return
             self.show(muted, percent, port)
+            if port == HEADPHONES and (wheel_moved or self.port != HEADPHONES):
+                self.mirror_wheel()
+            self.port = port
         run(["pactl", "-f", "json", "list", "sinks"], got_sinks)
+
+    def watch_mixer(self):
+        """Follow the card's control changes with "alsactl monitor", which
+        blocks in the kernel and prints one line per change, so nothing runs
+        while the wheel is still. Lines look like
+        "node hw:L15, #30 (2,0,0,Handsfree Playback Volume,0) VALUE"."""
+        # alsa-utils installs alsactl in /usr/sbin, off a normal user's PATH.
+        # (amixer events would do too, but it buffers its output in a pipe.)
+        try:
+            self.monitor = Gio.Subprocess.new(
+                ["/usr/sbin/alsactl", "monitor", f"hw:{CARD}"],
+                Gio.SubprocessFlags.STDOUT_PIPE)
+        except GLib.Error as e:
+            log(f"alsactl monitor: {e.message}; the wheel won't reach the headphones")
+            return
+        stream = Gio.DataInputStream.new(self.monitor.get_stdout_pipe())
+
+        def got_line(stream, result):
+            try:
+                line, _ = stream.read_line_finish_utf8(result)
+            except GLib.Error as e:
+                log(f"alsactl monitor: {e.message}")
+                line = None
+            if line is None:
+                # alsactl ended. Start it again, but not in a tight loop.
+                log("alsactl monitor stopped; restarting it in 5 s")
+                self.monitor = None
+                GLib.timeout_add_seconds(5, lambda: self.watch_mixer() and False)
+                return
+            if f",{HANDSFREE_VOLUME}," in line:
+                self.refresh(wheel_moved=True)
+            elif f",{HEADSET_ROUTE}," in line:
+                # PA switching the port flips the routes, so this catches a
+                # switch made by pactl or MATE's sound preferences too.
+                self.refresh()
+            stream.read_line_async(GLib.PRIORITY_DEFAULT, None, got_line)
+        stream.read_line_async(GLib.PRIORITY_DEFAULT, None, got_line)
+
+    def mirror_wheel(self):
+        """Read the wheel's position from the speaker volume and set the
+        headphone volume to match. One copy at a time; wheel moves during a
+        copy fold into a single copy after it."""
+        if self.mirror_busy:
+            self.mirror_again = True
+            return
+        self.mirror_busy = True
+
+        def got(ok, out):
+            value = amixer_value(out) if ok else None
+            if value is None:
+                log(f"can't read {HANDSFREE_VOLUME}: {out.strip()}")
+            else:
+                self.popup.set_headset(headset_for(value))
+            self.mirror_busy = False
+            if self.mirror_again:
+                self.mirror_again = False
+                self.mirror_wheel()
+        run(["amixer", "-c", CARD, "cget", f"name={HANDSFREE_VOLUME}"], got)
 
     def show(self, muted, percent, port=None):
         self.icon.set_from_icon_name(icon_for(muted, percent))
@@ -273,27 +384,33 @@ class Popup(Gtk.Window):
             self.app.set_port(port)
 
     def read_headset(self):
-        # "  : values=13,13"
         def got(ok, out):
-            for line in out.splitlines():
-                if line.strip().startswith(": values="):
-                    try:
-                        value = int(line.split("=")[1].split(",")[0])
-                    except ValueError:
-                        break
-                    self.updating = True
-                    self.scale.set_value(value)
-                    self.updating = False
-                    return
-            log(f"can't read {HEADSET_VOLUME}: {out.strip()}")
+            value = amixer_value(out) if ok else None
+            if value is None:
+                log(f"can't read {HEADSET_VOLUME}: {out.strip()}")
+                return
+            self.show_headset(value)
         run(["amixer", "-c", CARD, "cget", f"name={HEADSET_VOLUME}"], got)
 
+    def show_headset(self, value):
+        self.updating = True
+        self.scale.set_value(value)
+        self.updating = False
+
+    def set_headset(self, value):
+        """Write the headphone volume (from the wheel) and move the slider to
+        it."""
+        self.show_headset(value)
+        self.queue_headset(value)
+
     def on_scale_changed(self, scale):
-        if self.updating:
-            return
-        # A drag fires many changes; run one amixer at a time and send only
-        # the latest value when it finishes.
-        self.hs_pending = round(scale.get_value())
+        if not self.updating:
+            self.queue_headset(round(scale.get_value()))
+
+    def queue_headset(self, value):
+        # A drag or a wheel turn fires many changes; run one amixer at a time
+        # and send only the latest value when it finishes.
+        self.hs_pending = value
         if not self.hs_busy:
             self.write_headset()
 
