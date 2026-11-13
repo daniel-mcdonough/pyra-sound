@@ -15,6 +15,7 @@ Depends: ${misc:Depends},
          gir1.2-gtk-3.0,
          pulseaudio-utils,
          alsa-utils
+Recommends: pyra-config-desktop
 Description: sound tray icon for the DragonBox Pyra
  A sound icon for MATE's Notification Area, meant to take the place of
  mate-volume-control-status-icon on the Pyra. Left click mutes and

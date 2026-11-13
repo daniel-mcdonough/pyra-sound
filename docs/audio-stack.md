@@ -113,7 +113,8 @@ Which one is running depends on the kernel:
   key turns it off (checked 2026-11-13).
 - The session's `XDG_CONFIG_DIRS` is `/etc/xdg/pyra:/etc/xdg`, set by `pyra-config-desktop`'s
   `/etc/X11/Xsession.d/65pyra_xdg-config` (seen in mate-panel's environment 2026-11-13). A same-named file in
-  `/etc/xdg/pyra/autostart` masks MATE's.
+  `/etc/xdg/pyra/autostart` masks MATE's. On the image `pyra-config-desktop` comes in through `pyra-meta-desktop-base`
+  and `pyra-config-all`; pyra-sound only `Recommends:` it.
 - `pyra-sound` replaces it: our autostart entry adds a tray icon, and the package's mask (`Hidden=true`, shipped as
   a symlink so `apt remove` deletes it) stops MATE's from starting (NEXT 1.4). Untested until 1.4: that
   mate-session honours the mask.
