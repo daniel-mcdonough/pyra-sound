@@ -1,0 +1,12 @@
+# Installed by pyra-sound. Linked from /etc/xdg/pyra/autostart, which comes
+# before /etc/xdg in XDG_CONFIG_DIRS on the Pyra (pyra-config-desktop), so
+# it masks MATE's own sound icon: pyra-sound's icon takes its place.
+# Removing pyra-sound removes the link and brings MATE's icon back at the
+# next login. To keep MATE's icon per user, put a copy of
+# /etc/xdg/autostart/mate-volume-control-status-icon.desktop in
+# ~/.config/autostart.
+[Desktop Entry]
+Type=Application
+Name=Volume Control
+Exec=mate-volume-control-status-icon
+Hidden=true

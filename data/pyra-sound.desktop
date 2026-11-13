@@ -3,6 +3,7 @@ Type=Application
 Name=Pyra Sound
 Comment=Sound icon for the DragonBox Pyra: mute, speakers or headphones
 Exec=pyra-sound
+TryExec=pyra-sound
 Icon=audio-volume-high
 Terminal=false
 NoDisplay=true
