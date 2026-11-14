@@ -116,8 +116,13 @@ Which one is running depends on the kernel:
   `/etc/xdg/pyra/autostart` masks MATE's. On the image `pyra-config-desktop` comes in through `pyra-meta-desktop-base`
   and `pyra-config-all`; pyra-sound only `Recommends:` it.
 - `pyra-sound` replaces it: our autostart entry adds a tray icon, and the package's mask (`Hidden=true`, shipped as
-  a symlink so `apt remove` deletes it) stops MATE's from starting (NEXT 1.4). Untested until 1.4: that
-  mate-session honours the mask.
+  a symlink so `apt remove` deletes it) stops MATE's from starting (NEXT 1.4). Verified on the unit 2026-11-13:
+  mate-session honours the mask (`Hidden=true` in `/etc/xdg/pyra/autostart`); after a fresh login only pyra-sound
+  runs, and after `apt remove` (symlink and the then-empty `/etc/xdg/pyra/autostart` gone) MATE's icon is back at
+  the next login. The running MATE icon stays until logout.
+- Our own `/etc/xdg/autostart/pyra-sound.desktop` is a conffile and survives `apt remove` (state `rc`). Without
+  `TryExec=pyra-sound`, mate-session logs `Could not launch application 'pyra-sound.desktop'` to
+  `~/.xsession-errors` at every login after removal; the entry carries `TryExec` for that.
 - Its icons are the full-colour theme names `audio-volume-muted` / `-low` / `-medium` / `-high` (from the
   binary's strings; theme `mate`), not the `-symbolic` ones, chosen by PA sink volume in thirds of 100%. pyra-sound
   uses the same names and rule (`icon_for()`); the user confirmed both look identical 2026-11-12. On AESS the sink
