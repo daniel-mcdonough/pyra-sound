@@ -60,10 +60,6 @@ HEADSET_MAX = 15
 HANDSFREE_VOLUME = "Handsfree Playback Volume"
 HANDSFREE_MAX = 29
 
-# A route mux that the PA port paths flip on every switch between the
-# speakers and the headphones (docs/audio-stack.md, "Two kernel paths").
-HEADSET_ROUTE = "Headset Left Playback"
-
 
 def headset_for(handsfree):
     """The wheel position mapped linearly onto the headphone volume steps, so
@@ -85,14 +81,18 @@ def amixer_value(out):
 
 # The same full-colour theme icons mate-volume-control-status-icon uses, so
 # this one looks like the icon it replaces. MATE picks one of the three by the
-# sink volume in thirds of 100%; icon_for() does the same.
+# sink volume in thirds of 100%; icon_for() does the same. MATE's icons don't
+# show the output, so the headphones get the theme's headphones picture.
 ICONS = ("audio-volume-muted", "audio-volume-low",
          "audio-volume-medium", "audio-volume-high")
+HEADPHONES_ICON = "audio-headphones"
 
 
-def icon_for(muted, percent):
+def icon_for(muted, percent, port=None):
     if muted or percent <= 0:
         return ICONS[0]
+    if port == HEADPHONES:
+        return HEADPHONES_ICON
     return ICONS[min(3, max(1, percent * 3 // 100 + 1))]
 
 
@@ -145,6 +145,10 @@ class PyraSound(Gtk.Application):
         self.popup = None
         self.port = None          # last port seen, to notice a switch
         self.monitor = None       # the alsactl monitor process
+        self.subscribe = None     # the pactl subscribe process
+        self.refresh_queued = False
+        self.pa = (False, 100, None)  # PA's mute, volume and port
+        self.amp = {}             # amp volume control -> its last value
         self.mirror_busy = False  # a wheel-to-headphones copy is running
         self.mirror_again = False # the wheel moved during it
 
@@ -158,13 +162,17 @@ class PyraSound(Gtk.Application):
         self.popup = Popup(self)
         self.show(False, 100)
         self.refresh()
+        self.read_amp(HANDSFREE_VOLUME)
+        self.read_amp(HEADSET_VOLUME)
         self.watch_mixer()
+        self.watch_pulse()
         for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, self.on_signal)
 
     def do_shutdown(self):
-        if self.monitor:
-            self.monitor.force_exit()
+        for proc in (self.monitor, self.subscribe):
+            if proc:
+                proc.force_exit()
         Gtk.Application.do_shutdown(self)
 
     def on_signal(self):
@@ -242,12 +250,57 @@ class PyraSound(Gtk.Application):
                 return
             if f",{HANDSFREE_VOLUME}," in line:
                 self.refresh(wheel_moved=True)
-            elif f",{HEADSET_ROUTE}," in line:
-                # PA switching the port flips the routes, so this catches a
-                # switch made by pactl or MATE's sound preferences too.
-                self.refresh()
+                self.read_amp(HANDSFREE_VOLUME)
+            elif f",{HEADSET_VOLUME}," in line:
+                self.read_amp(HEADSET_VOLUME)
             stream.read_line_async(GLib.PRIORITY_DEFAULT, None, got_line)
         stream.read_line_async(GLib.PRIORITY_DEFAULT, None, got_line)
+
+    def watch_pulse(self):
+        """Follow PulseAudio's state with "pactl subscribe", which waits on
+        the server and prints one line per event, so outside changes (pactl,
+        MATE's sound preferences) show up without polling. Mute, volume and
+        port changes all come as "Event 'change' on sink #0"; our own pactl
+        calls only add "client" events, so refreshing doesn't feed itself."""
+        try:
+            self.subscribe = Gio.Subprocess.new(
+                ["pactl", "subscribe"], Gio.SubprocessFlags.STDOUT_PIPE)
+        except GLib.Error as e:
+            log(f"pactl subscribe: {e.message}; outside changes won't show")
+            return
+        stream = Gio.DataInputStream.new(self.subscribe.get_stdout_pipe())
+
+        def got_line(stream, result):
+            try:
+                line, _ = stream.read_line_finish_utf8(result)
+            except GLib.Error as e:
+                log(f"pactl subscribe: {e.message}")
+                line = None
+            if line is None:
+                # PulseAudio went away (or pactl did). Try again, slowly, and
+                # read the state afresh once it's back.
+                log("pactl subscribe stopped; restarting it in 5 s")
+                self.subscribe = None
+                GLib.timeout_add_seconds(5, lambda: self.watch_pulse() and False)
+                return
+            if " on sink #" in line or " on server" in line:
+                self.queue_refresh()
+            stream.read_line_async(GLib.PRIORITY_DEFAULT, None, got_line)
+        stream.read_line_async(GLib.PRIORITY_DEFAULT, None, got_line)
+        self.queue_refresh()
+
+    def queue_refresh(self):
+        """One refresh for a burst of PA events (a volume drag in MATE's
+        preferences sends dozens), 100 ms after the first."""
+        if self.refresh_queued:
+            return
+        self.refresh_queued = True
+
+        def fire():
+            self.refresh_queued = False
+            self.refresh()
+            return GLib.SOURCE_REMOVE
+        GLib.timeout_add(100, fire)
 
     def mirror_wheel(self):
         """Read the wheel's position from the speaker volume and set the
@@ -270,12 +323,39 @@ class PyraSound(Gtk.Application):
                 self.mirror_wheel()
         run(["amixer", "-c", CARD, "cget", f"name={HANDSFREE_VOLUME}"], got)
 
+    def read_amp(self, control):
+        """Read an amp volume (the wheel's, or the headphones') for the
+        tooltip."""
+        def got(ok, out):
+            value = amixer_value(out) if ok else None
+            if value is None:
+                log(f"can't read {control}: {out.strip()}")
+                return
+            self.amp[control] = value
+            self.show(*self.pa)
+        run(["amixer", "-c", CARD, "cget", f"name={control}"], got)
+
     def show(self, muted, percent, port=None):
-        self.icon.set_from_icon_name(icon_for(muted, percent))
-        text = "Sound: muted" if muted else f"Sound: {percent}%"
+        self.pa = (muted, percent, port)
+        self.icon.set_from_icon_name(icon_for(muted, percent, port))
         if port in PORT_NAMES:
-            text += f", {PORT_NAMES[port]}"
             self.popup.show_port(port)
+        # The loudness is the amp's volume: the wheel's position on the
+        # speakers, the headphone volume (the wheel's copy, or the popup's
+        # slider) on the headphones. PA's volume normally stays at 100%, so
+        # it's only worth mentioning when someone has moved it.
+        if port == HEADPHONES:
+            output, control, top = "Headphones", HEADSET_VOLUME, HEADSET_MAX
+        else:
+            output, control, top = "Speakers", HANDSFREE_VOLUME, HANDSFREE_MAX
+        if muted:
+            text = f"{output}: muted"
+        elif control in self.amp:
+            text = f"{output}: {round(self.amp[control] * 100 / top)}%"
+        else:
+            text = output
+        if not muted and percent != 100:
+            text += f" (PulseAudio {percent}%)"
         self.icon.set_tooltip_text(text)
 
 
