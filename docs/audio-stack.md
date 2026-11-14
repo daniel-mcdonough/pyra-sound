@@ -102,6 +102,22 @@ Which one is running depends on the kernel:
 - Idle cost: none. With both monitors running, no pyra-sound thread woke up in 30 s (`voluntary_ctxt_switches`
   unchanged, 2026-11-13).
 
+## Child lifetime: setpriv --pdeathsig (NEXT 2.3)
+
+- Both watchers start through `watcher()`: `setpriv --pdeathsig TERM <argv>` (util-linux, Essential on trixie),
+  so the kernel SIGTERMs them when pyra-sound dies, however it dies. setpriv execs, so `ps` shows plain `pactl` /
+  `alsactl` with pyra-sound as parent.
+- Why `do_shutdown()` isn't enough: at logout the X connection drops and GDK's IO-error handler calls `exit()`,
+  so neither `do_shutdown()` nor the signal handlers run (reproduced 2026-11-14 with `xkill -id` on pyra-sound's
+  window). SIGKILL is the same. SIGTERM/SIGINT/SIGHUP did clean up.
+- Orphans differ: an orphaned `alsactl monitor` dies of SIGPIPE at the next mixer event; `pactl subscribe`
+  ignores SIGPIPE (signal 13 set in `SigIgn` of `/proc/PID/status`) and lives forever, keeping its login session's scope
+  and the logind session in `closing`.
+- Verified on the unit 2026-11-14 with the fix: xkill, `pkill -KILL`, `pkill` and a real logout/login leave no
+  `pactl subscribe` / `alsactl monitor` behind.
+- Not ours: on the unit, old x11 sessions also stay `closing` because each holds a leftover `dbp-desktopd`
+  (Pyra desktop daemon), with or without pyra-sound.
+
 ## Headphone jack detection
 
 - ALSA jack kctls `Headset Stereophone Jack` (numid 37), `Headset Mic Jack` (36). They are `iface=CARD`, so

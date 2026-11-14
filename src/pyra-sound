@@ -127,6 +127,16 @@ def aess_kernel():
         return False
 
 
+def watcher(argv):
+    """Start a long-lived child whose stdout we read line by line. setpriv
+    (util-linux, Essential) asks the kernel to SIGTERM it when we die: at
+    logout the X connection drops and GDK exits without do_shutdown(), and
+    "pactl subscribe" ignores SIGPIPE, so it would outlive us for good and
+    hold the old login session open (NEXT 2.3)."""
+    return Gio.Subprocess.new(["setpriv", "--pdeathsig", "TERM", *argv],
+                              Gio.SubprocessFlags.STDOUT_PIPE)
+
+
 def run(argv, done=None):
     """Run a command without blocking the main loop. done(ok, stdout) is
     called when it finishes."""
@@ -241,9 +251,7 @@ class PyraSound(Gtk.Application):
         # alsa-utils installs alsactl in /usr/sbin, off a normal user's PATH.
         # (amixer events would do too, but it buffers its output in a pipe.)
         try:
-            self.monitor = Gio.Subprocess.new(
-                ["/usr/sbin/alsactl", "monitor", f"hw:{CARD}"],
-                Gio.SubprocessFlags.STDOUT_PIPE)
+            self.monitor = watcher(["/usr/sbin/alsactl", "monitor", f"hw:{CARD}"])
         except GLib.Error as e:
             log(f"alsactl monitor: {e.message}; the tooltip won't follow the wheel")
             return
@@ -274,8 +282,7 @@ class PyraSound(Gtk.Application):
         port changes all come as "Event 'change' on sink #0"; our own pactl
         calls only add "client" events, so refreshing doesn't feed itself."""
         try:
-            self.subscribe = Gio.Subprocess.new(
-                ["pactl", "subscribe"], Gio.SubprocessFlags.STDOUT_PIPE)
+            self.subscribe = watcher(["pactl", "subscribe"])
         except GLib.Error as e:
             log(f"pactl subscribe: {e.message}; outside changes won't show")
             return
