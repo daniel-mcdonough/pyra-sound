@@ -4,7 +4,7 @@ One line per file. Read the doc for the area you're changing; don't read them al
 
 | File | Covers | Tier |
 |---|---|---|
-| `audio-stack.md` | Card L15, mixer controls, AESS vs direct PulseAudio layouts, volume wheel, jack detection, MATE's sound icon | 3: read when touching audio |
+| `audio-stack.md` | Card L15, mixer controls, AESS vs direct PulseAudio layouts, volume wheel, pactl subscribe, jack detection, MATE's sound icon and pyra-sound's icon/tooltip | 3: read when touching audio |
 | `BACKLOG.md` | Cold NEXT items, same IDs | 4: grep only |
 | `LESSONS.md` | Full list of tooling and harness gotchas | 4: grep only |
 

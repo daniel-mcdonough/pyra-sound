@@ -79,8 +79,12 @@ Which one is running depends on the kernel:
   of the same value produces no event, so `pyra_volumed`'s rewrites of an unchanged position don't wake
   pyra-sound (verified 2026-11-13).
 - pyra-sound copies only while PA's active port is `pyra-headphones` (read from PA on each event), and copies
-  at once when the port becomes the headphones. A port switch from outside (pactl, MATE's preferences) shows up
-  as a `Headset Left Playback` route event in the same monitor, so pyra-sound re-reads PA on that too.
+  at once when the port becomes the headphones. A port switch from outside (pactl, MATE's preferences) reaches it
+  through `pactl subscribe` (see "Following PulseAudio: pactl subscribe"). It also shows up as a
+  `Headset Left Playback` route event in the alsactl monitor; pyra-sound used that until NEXT 1.5.
+- The same monitor feeds the tooltip: pyra-sound re-reads `Handsfree` / `Headset Playback Volume` on their events.
+  After NEXT 1.8 the Handsfree and Headset events are still needed for that, so `watch_mixer()` stays, only
+  without the copy.
 - Verified on the unit 2026-11-13, with the user listening: the wheel from bottom to top and back gives HS 0..15
   in step with HF, never going backwards, sometimes one event behind; HS stays put while the speakers are
   selected.
@@ -91,6 +95,19 @@ Which one is running depends on the kernel:
   wheel `travel()` on every change, with no port check (the port paths route exclusively, so the headphone volume
   only matters while it is routed). One ioctl instead of three subprocesses per step, all 16 steps reachable,
   works without a session. Then the applet's mirror goes.
+
+## Following PulseAudio: pactl subscribe
+
+- `pactl subscribe` prints one line per server event and flushes each line into a pipe; events arrive about 10 ms
+  after the change (verified on the unit 2026-11-13). pyra-sound runs it as a long-lived child (`watch_pulse()`,
+  restarted after 5 s if it ends) and does one `pactl list sinks` 100 ms after the first `sink` / `server` event
+  of a burst (`queue_refresh()`).
+- Mute, volume and port changes on `aess` all come as `Event 'change' on sink #0`. Setting a volume to the value
+  it already has gives no sink event.
+- Every pactl call adds `new` / `change` / `remove` events `on client #N`, so filtering to `sink` / `server`
+  keeps pyra-sound's own reads from triggering more reads.
+- Idle cost: none. With both monitors running, no pyra-sound thread woke up in 30 s (`voluntary_ctxt_switches`
+  unchanged, 2026-11-13).
 
 ## Headphone jack detection
 
@@ -127,3 +144,10 @@ Which one is running depends on the kernel:
   binary's strings; theme `mate`), not the `-symbolic` ones, chosen by PA sink volume in thirds of 100%. pyra-sound
   uses the same names and rule (`icon_for()`); the user confirmed both look identical 2026-11-12. On AESS the sink
   volume normally sits at 100% (the wheel moves ALSA, not PA), so it shows "high" unless muted.
+- MATE's icons don't show the output. pyra-sound shows the theme's `audio-headphones` (in theme `mate`) while the
+  headphones port is active and not muted; muted is `audio-volume-muted` on either output (user's choice
+  2026-11-13).
+- pyra-sound's tooltip is `Speakers: N%` / `Headphones: N%` / `<output>: muted`. N is the amp volume as a share of
+  its steps: Handsfree/29 (the wheel) on the speakers, Headset/15 (the wheel's copy or the popup slider, same % as
+  the slider) on the headphones. The PA volume is left out and assumed to be 100%; when it isn't, the tooltip
+  adds `(PulseAudio N%)` (user 2026-11-13: the wheel's volume is what counts).
