@@ -39,7 +39,7 @@ Which one is running depends on the kernel:
 | | AESS (`5.6.19-m4`, `-m4-kbdled`) | Direct McPDM (`-fix`, `-freq`, `-pyradef`) |
 |---|---|---|
 | PA script | `/etc/pulse/pyra-aess.pa` | `/etc/pulse/pyra.pa` (pyra-config-pulseaudio) |
-| Sinks | one sink `aess`, ports `pyra-speaker` (prio 100), `pyra-headphones` (prio 90) | 4-channel `alsa_output.hw_CARD_L15_DEV_0` plus remap sinks `speakers` (rear pair, default) and `headphones` (front pair) |
+| Sinks | one sink `aess`, ports `pyra-speaker` (prio 10000), `pyra-headphones` (prio 9000) | 4-channel `alsa_output.hw_CARD_L15_DEV_0` plus remap sinks `speakers` (rear pair, default) and `headphones` (front pair) |
 | Switch output | `pactl set-sink-port aess pyra-headphones` / `pyra-speaker`; the port's mixer path flips the codec routes | change default sink and move streams; both amps stay routed, split by channel |
 | PA card | `alsa_card.L15` | none (bare `module-alsa-sink`) |
 
@@ -110,8 +110,15 @@ Which one is running depends on the kernel:
   reporting `SW_HEADPHONE_INSERT`.
 - Stock kernels: always reads "inserted" (the TWL6040's detect is stuck; the real detector, a TS3A227E, never
   probes). Fixed only in `5.6.19-m4-kbdled` (patches 0037-0039 in `../dragonbox-pyra/experiments/jack-detect/`).
-- Even with the fix, **unplug is not detected while the headset amp is powered**. That is a hardware limit, so
-  there's no automatic switch back to the speakers. This is why pyra-sound switches by hand on right click.
+- Even with the fix, **unplug is not detected while the headset amp is powered** (a hardware limit). With nothing
+  playing, the amp is off and unplug is seen at once.
+- On m4-kbdled, PA already follows the jack (verified 2026-11-14, NEXT 2.1). The speaker port also
+  goes "not available" while the jack reads in. Plug-in: jack kctl `on`, `module-switch-on-port-available` moves
+  `aess` to `pyra-headphones` and the routes flip, playing or not. Unplug while idle: PA switches back to
+  `pyra-speaker`. Unplug while playing: missed, `aess` stays on headphones and the speakers read "not available".
+  A manual `pactl set-sink-port aess pyra-speaker` is still accepted (rc 0, routes flip). It powers the headset
+  amp down, so the detector then catches the unplug: jack `off`, headphones "not available", no stuck state.
+  pyra-sound therefore has no jack code; it only follows the sink events. Right click remains the way back.
 
 ## MATE's sound icon: mate-volume-control-status-icon
 
