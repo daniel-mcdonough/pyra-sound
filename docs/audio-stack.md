@@ -154,3 +154,8 @@ Which one is running depends on the kernel:
   its steps: Handsfree/29 (the wheel) on the speakers, Headset/15 (the wheel through the calibrated daemon, or the popup slider,
   same % as the slider) on the headphones. The PA volume is left out and assumed to be 100%; when it isn't, the tooltip
   adds `(PulseAudio N%)` (user 2026-11-13: the wheel's volume is what counts).
+- No scroll on the icon (user's decision 2026-11-14, NEXT 2.2). Scroll can't move the wheel's volume
+  (`pyra_volumed` overwrites Handsfree), so it could only step the `aess` PA software volume, a second volume in
+  series with the amp: "wheel at max but still quiet", accidental turn-downs from the nubs' scroll mode over the tray,
+  and digital attenuation where the amp would do better. The wheel is the volume control; a PA volume off 100% shows
+  in the tooltip and is reset in MATE's sound preferences. Unlike MATE's icon, which scrolls the PA volume.
