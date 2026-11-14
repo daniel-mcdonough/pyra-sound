@@ -1,3 +1,10 @@
+pyra-sound (0.2) trixie; urgency=medium
+
+  * pactl subscribe and alsactl monitor now exit with pyra-sound, also at
+    logout or when it is killed; 0.1 left them running after every session.
+
+ -- pyra-sound maintainers <pyra-sound@example.invalid>  Sat, 14 Nov 2026 18:00:00 +0000
+
 pyra-sound (0.1) trixie; urgency=medium
 
   * Initial release: a sound icon for MATE's Notification Area on the Pyra,

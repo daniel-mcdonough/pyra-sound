@@ -31,7 +31,9 @@ The host is Arch. Inspect the .deb in the container:
 ## `ssh pyra-release '... setsid -f ...'` never returns
 
 A child started with `setsid -f` that keeps the ssh session's stdout open holds the ssh command until the tool
-timeout. Redirect the child's output inside its `sh -c` and give ssh `</dev/null`, or run the ssh in the background.
+timeout. Redirecting only inside `sh -c "pyra-sound >/dev/null 2>&1"` is not enough: the `sh` itself keeps the fds
+(S13). Redirect the whole thing, `setsid -f pyra-sound >/dev/null 2>&1 </dev/null`, give ssh `</dev/null`, or run
+the ssh in the background.
 
 ## Killing a test `alsactl monitor` also kills pyra-sound's
 
