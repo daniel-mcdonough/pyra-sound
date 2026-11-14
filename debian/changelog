@@ -1,7 +1,12 @@
 pyra-sound (0.1) trixie; urgency=medium
 
-  * Initial release: a tray icon that mutes the sound on left click.
-  * Right click: choose speakers or headphones, set the headphone volume.
-  * The volume wheel drives the headphones too while they are selected.
+  * Initial release: a sound icon for MATE's Notification Area on the Pyra,
+    in place of MATE's own, which the package hides at login.
+  * Left click mutes; right click chooses the speakers or the headphones.
+  * Icon and tooltip show the output and the amplifier volume, and follow
+    changes made elsewhere.
+  * The volume wheel stays with pyra_volumed. A headphone volume slider
+    shows only when the running daemon doesn't drive the headphones.
+  * AESS kernels (5.6.19-m4*) only.
 
- -- pyra-sound maintainers <pyra-sound@example.invalid>  Thu, 12 Nov 2026 12:00:00 +0000
+ -- pyra-sound maintainers <pyra-sound@example.invalid>  Sat, 14 Nov 2026 12:00:00 +0000

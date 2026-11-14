@@ -17,10 +17,12 @@ Depends: ${misc:Depends},
          alsa-utils
 Recommends: pyra-config-desktop
 Description: sound tray icon for the DragonBox Pyra
- A sound icon for MATE's Notification Area, meant to take the place of
- mate-volume-control-status-icon on the Pyra. Left click mutes and
- unmutes the sound; right click opens a small window to switch between
- the speakers and the headphones and to set the headphone volume.
+ A sound icon for MATE's Notification Area that takes the place of
+ mate-volume-control-status-icon on the Pyra (the package hides MATE's
+ icon). Left click mutes and unmutes the sound; right click opens a small
+ window to switch between the speakers and the headphones. The volume
+ wheel stays with pyra_volumed; when the running daemon doesn't drive the
+ headphones, the window also offers a headphone volume slider.
  .
  It works with the Pyra's AESS kernels (5.6.19-m4*) only and needs no
  root: everything goes through PulseAudio as the logged-in user.
