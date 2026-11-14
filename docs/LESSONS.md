@@ -51,4 +51,4 @@ run `! sudo systemctl start docker`. For a script-only change, `scp` + `sudo ins
 `.github/workflows/release.yml` creates the release; it doesn't replace one. To move a published tag (e.g. after a
 history rewrite), delete the GitHub release first (web UI; `gh` isn't logged in on the host), then
 `git push origin :refs/tags/vX` and push the tag again. `git filter-repo` drops `origin`; add it back before pushing.
-Workflow runs and releases can be read without auth: `curl -s https://api.github.com/repos/<owner>/pyra-sound/actions/runs` (owner from `git remote -v`).
+Workflow runs and releases can be read without auth while the repo is public (a private repo gives 404, S13): `curl -s https://api.github.com/repos/<owner>/pyra-sound/actions/runs` (owner from `git remote -v`).
