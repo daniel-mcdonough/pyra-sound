@@ -17,8 +17,8 @@ right click away.
 - An **AESS kernel** (`5.6.19-m4*`, PulseAudio sink `aess`). On a kernel with
   the direct McPDM audio path, pyra-sound prints `unsupported` and exits
   without an icon.
-- For the volume wheel on the headphones: dragonbox-pyra's calibrated
-  `pyra_volumed` (see [The volume wheel](#the-volume-wheel))
+- For the volume wheel on the headphones: a `pyra_volumed` that drives them
+  (see [The volume wheel](#the-volume-wheel))
 
 Dependencies (`python3-gi`, the GTK 3 introspection bindings, `pactl`,
 `alsa-utils`) are pulled in by apt.
@@ -47,7 +47,7 @@ To upgrade, install the newer `.deb` the same way. To remove it:
 | Input | Does |
 | --- | --- |
 | Left click | Mute / unmute |
-| Right click | Open a small window: *Speakers* or *Headphones* (and a headphone volume slider, see below). Click outside it or press Escape to close. |
+| Right click | Open a small window: *Speakers* or *Headphones*, and a bar with the playing output's volume (or a headphone volume slider, see below). Click outside it or press Escape to close. |
 | Volume wheel | Volume of both outputs, through `pyra_volumed` |
 
 The **icon** is MATE's own volume icon while the speakers play, a headphones
@@ -60,8 +60,12 @@ volume, the one the wheel moves. PulseAudio's volume normally stays at 100%;
 if something else (a volume control, a media key) moves it, the tooltip adds
 it, as in `Speakers: 62% (PulseAudio 40%)`.
 
+The **bar** in the right-click window shows the same amplifier volume as the
+tooltip and follows the wheel while the window is open. It is read only: the
+wheel's daemon owns that volume.
+
 Changes made elsewhere (MATE's sound preferences, `pactl`, the wheel) show up
-in the icon and the tooltip within a moment. pyra-sound does no work while
+in the icon, the tooltip and the bar within a moment. pyra-sound does no work while
 nothing changes.
 
 ## The volume wheel
@@ -69,12 +73,12 @@ nothing changes.
 The wheel is read by a root daemon, `pyra_volumed`, not by pyra-sound. There
 are two daemons by that name:
 
-- **dragonbox-pyra's calibrated `pyra_volumed`** (recommended) sets the
-  speaker and the headphone amplifier together on every turn, so the wheel
-  works on whichever output plays.
-- **pyra-hacks' packaged `pyra_volumed`** sets only the speakers. With it, or
-  with no daemon running, the right-click window gets a headphone volume
-  slider instead.
+- **dragonbox-pyra's calibrated `pyra_volumed`**, and pyra-hacks' from
+  `0.38+pyra2` on, set the speaker and the headphone amplifier together on
+  every turn, so the wheel works on whichever output plays.
+- **pyra-hacks' packaged `pyra_volumed` up to 0.38** sets only the speakers.
+  With it, or with no daemon running, the right-click window shows a
+  headphone volume slider in place of the bar while the headphones play.
 
 The slider sets the headphone amplifier directly. With the calibrated daemon
 a slider value would only hold until the next turn of the wheel, which is why
@@ -128,8 +132,8 @@ AESS kernel (`uname -r` shows `5.6.19-m4…`). Its other messages also land in
 `~/.xsession-errors`.
 
 **The wheel doesn't change the headphone volume.** The packaged
-`pyra_volumed` (or none) is running. Use the slider in the right-click window,
-or install dragonbox-pyra's calibrated daemon.
+`pyra_volumed` up to 0.38 (or none) is running. Use the slider in the
+right-click window, or install a daemon that drives the headphones.
 
 **MATE's icon is still there.** It goes away from the next login on. If it
 still shows after a new login, check that `/etc/xdg/pyra` comes first in

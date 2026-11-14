@@ -1,3 +1,12 @@
+pyra-sound (0.3) trixie; urgency=medium
+
+  * The right-click window shows the playing output's volume as a read-only
+    bar that follows the wheel.
+  * pyra-hacks' pyra_volumed from 0.38+pyra2 on is recognised as driving the
+    headphones, so the headphone slider no longer shows with it.
+
+ -- pyra-sound maintainers <pyra-sound@example.invalid>  Sat, 14 Nov 2026 21:30:00 +0000
+
 pyra-sound (0.2) trixie; urgency=medium
 
   * pactl subscribe and alsactl monitor now exit with pyra-sound, also at

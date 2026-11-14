@@ -12,10 +12,11 @@
 # USING IT
 #
 #   left click               mute / unmute
-#   right click              output (speakers / headphones), and a
-#                            headphone volume slider when the volume wheel
-#                            doesn't drive the headphones (an older
-#                            pyra_volumed, or none running)
+#   right click              output (speakers / headphones), the wheel's
+#                            volume (read only), and a headphone volume
+#                            slider when the volume wheel doesn't drive the
+#                            headphones (an older pyra_volumed, or none
+#                            running)
 #
 # It talks to PulseAudio through pactl, on the AESS kernels' single sink
 # "aess". On a kernel with the direct McPDM path it says "unsupported" on
@@ -50,8 +51,9 @@ SINK = "aess"
 SPEAKER, HEADPHONES = "pyra-speaker", "pyra-headphones"
 PORT_NAMES = {SPEAKER: "speakers", HEADPHONES: "headphones"}
 
-# The headphone amp's volume, 0..15 (-30..0 dB). dragonbox-pyra's pyra_volumed
-# writes it from the wheel; pyra-hacks' packaged one doesn't.
+# The headphone amp's volume, 0..15 (-30..0 dB). pyra_volumed writes it from
+# the wheel (dragonbox-pyra's build, pyra-hacks' from 0.38+pyra2); older
+# packaged ones don't.
 # Never write "Handsfree Playback Volume": pyra_volumed owns that one.
 CARD = "L15"
 HEADSET_VOLUME = "Headset Playback Volume"
@@ -66,9 +68,10 @@ HANDSFREE_MAX = 29
 def wheel_drives_headset():
     """True if a running pyra_volumed writes the headphone volume. Its
     process is root's, so /proc/PID/exe is closed to us; take the binary from
-    argv[0] and look for the control's name in it (docs/audio-stack.md,
-    "Volume wheel: pyra_volumed")."""
-    needle = HEADSET_VOLUME.encode()
+    argv[0] and look for the control's name in it: the full name in
+    dragonbox-pyra's build, the simple mixer element "Headset" in pyra-hacks'
+    (0.38+pyra2 on) (docs/audio-stack.md, "Volume wheel: pyra_volumed")."""
+    needles = (HEADSET_VOLUME.encode(), b"\0Headset\0")
     for pid in filter(str.isdigit, os.listdir("/proc")):
         try:
             with open(f"/proc/{pid}/comm") as f:
@@ -78,8 +81,9 @@ def wheel_drives_headset():
                 argv0 = f.read().split(b"\0")[0].decode()
             path = argv0 if "/" in argv0 else shutil.which(argv0)
             with open(path, "rb") as f:
-                if needle in f.read():
-                    return True
+                binary = f.read()
+            if any(n in binary for n in needles):
+                return True
         except (OSError, TypeError, UnicodeDecodeError):
             continue
     return False
@@ -352,11 +356,13 @@ class PyraSound(Gtk.Application):
         if not muted and percent != 100:
             text += f" (PulseAudio {percent}%)"
         self.icon.set_tooltip_text(text)
+        self.popup.show_level(port == HEADPHONES, output, self.amp.get(control), top)
 
 
 class Popup(Gtk.Window):
-    """The right-click window: output choice, and the headphone volume when
-    the wheel doesn't drive it.
+    """The right-click window: output choice, the wheel's volume (a bar, read
+    only: pyra_volumed owns it), and the headphone volume when the wheel
+    doesn't drive it.
 
     A window rather than a Gtk.Menu, because a Gtk.Scale inside a menu item
     doesn't get its drags; MATE's own sound icon pops up a window too. It
@@ -368,6 +374,8 @@ class Popup(Gtk.Window):
         self.updating = False     # set while we move the widgets ourselves
         self.hs_pending = None    # headset value waiting to be written
         self.hs_busy = False      # an amixer write is running
+        self.wheel = True         # pyra_volumed drives the headphones
+        self.level_on_hp = False  # the bar shows the headphones' level
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6,
                       border_width=10)
@@ -377,6 +385,20 @@ class Popup(Gtk.Window):
         for button, port in ((self.speaker, SPEAKER), (self.headphones, HEADPHONES)):
             button.connect("toggled", self.on_port_toggled, port)
             box.pack_start(button, False, False, 0)
+        # The wheel's volume on the active output. A LevelBar, not a Scale:
+        # Handsfree is pyra_volumed's alone, and dragging would fight it.
+        self.level = [Gtk.Separator(), Gtk.Box(spacing=6)]
+        self.level_label = Gtk.Label(xalign=0)
+        self.level_value = Gtk.Label(xalign=1)
+        self.level[1].pack_start(self.level_label, True, True, 0)
+        self.level[1].pack_start(self.level_value, False, False, 0)
+        self.bar = Gtk.LevelBar(min_value=0, max_value=1)
+        # No low/high/full colours: a quiet setting isn't a warning.
+        for name in (Gtk.LEVEL_BAR_OFFSET_LOW, Gtk.LEVEL_BAR_OFFSET_HIGH, "full"):
+            self.bar.remove_offset_value(name)
+        self.level.append(self.bar)
+        for widget in self.level:
+            box.pack_start(widget, False, False, 0)
         # The slider's widgets, shown only when the wheel can't reach the
         # headphones (see open()).
         self.slider = [Gtk.Separator(),
@@ -407,9 +429,10 @@ class Popup(Gtk.Window):
     def open(self):
         self.app.refresh()
         # Checked on every open: pyra_volumed can be swapped or restarted.
-        wheel = wheel_drives_headset()
+        wheel = self.wheel = wheel_drives_headset()
         for widget in self.slider:
             widget.set_visible(not wheel)
+        self.update_level_visibility()
         if not wheel:
             self.read_headset()
         self.resize(1, 1)         # shrink back after the slider goes
@@ -465,6 +488,28 @@ class Popup(Gtk.Window):
         self.updating = True
         (self.headphones if port == HEADPHONES else self.speaker).set_active(True)
         self.updating = False
+
+    def show_level(self, on_hp, output, value, top):
+        """The active output's amp volume, as the tooltip has it."""
+        self.level_on_hp = on_hp
+        self.level_label.set_text(f"{output} volume")
+        if value is None:
+            self.bar.set_value(0)
+            self.level_value.set_text("?")
+        else:
+            self.bar.set_value(value / top)
+            self.level_value.set_text(f"{round(value * 100 / top)}%")
+        self.update_level_visibility()
+
+    def update_level_visibility(self):
+        # On the headphones without the wheel, the slider shows that level.
+        visible = self.wheel or not self.level_on_hp
+        if visible != self.bar.get_visible():
+            for widget in self.level:
+                widget.set_visible(visible)
+            if self.get_visible():
+                self.resize(1, 1)
+                self.place()
 
     def on_port_toggled(self, button, port):
         if button.get_active() and not self.updating:

@@ -60,8 +60,10 @@ Which one is running depends on the kernel:
 
 - Tapered pot on IIO `palmas-gpadc`, channel `voltage2`. Not an input device.
 - Two daemons exist, both called `pyra_volumed`, both a root system service that polls the pot:
-  - pyra-hacks' packaged `/usr/bin/pyra_volumed` writes only `Handsfree Playback Volume`. The headphones get no
-    wheel.
+  - pyra-hacks' packaged `/usr/bin/pyra_volumed` up to 0.38 writes only `Handsfree Playback Volume`. The
+    headphones get no wheel. From the user's local `0.38+pyra2` on (`../pyra-hacks`, commit `eb1d488`) it writes
+    `Headset` too, over `hsrange lo hi` in `/etc/pyra_volumed.conf` (default 0..15). The test unit runs
+    `0.38+pyra3` since 2026-11-14 evening; the calibrated `/usr/local/bin` one is gone from it.
   - dragonbox-pyra's calibrated one (`device/pyra-volumed/`, built to `/usr/local/bin/pyra_volumed` by
     `pyra-volumed-run`, commit `177efeb` there) writes `Handsfree` and `Headset Playback Volume` from the same
     wheel travel on every turn, whichever port plays (each amp sits behind its own route). Headset covers all 16
@@ -71,14 +73,19 @@ Which one is running depends on the kernel:
 - Since NEXT 1.8 (2026-11-14) pyra-sound never copies the wheel to the headphones; the daemon does.
 - Telling the two apart (`wheel_drives_headset()` in `src/pyra-sound`): find the process by `/proc/PID/comm` =
   `pyra_volumed`, take the binary from `argv[0]` in `/proc/PID/cmdline` (`/proc/PID/exe` is root's and gives
-  EACCES to the session user), and look for the string `Headset Playback Volume` in it. Verified 2026-11-14:
-  the calibrated binary has it, the packaged one doesn't; `pyra-volumed-run` execs the absolute path, so argv[0]
+  EACCES to the session user), and look for `Headset Playback Volume` (calibrated build, full control name) or
+  `\0Headset\0` (pyra-hacks, which uses the simple mixer API, element names `Handsfree` / `Headset`, so the
+  full name isn't in its binary). Verified 2026-11-14: the calibrated binary has the full name, pyra-hacks
+  `0.38+pyra3` has `\0Headset\0`, stock pyra-hacks 0.38 has neither (only `\0Handsfree\0`); `pyra-volumed-run` execs the absolute path, so argv[0]
   is `/usr/local/bin/pyra_volumed`. No daemon, or one without the string: the popup shows its headphone volume
   slider. Checked on every popup open, since the daemon can be rebuilt or restarted under a running session.
 - Change detection for the tooltip: `/usr/sbin/alsactl monitor hw:L15` (not on a user's PATH) prints one line per
   control change, e.g. `node hw:L15, #30 (2,0,0,Handsfree Playback Volume,0) VALUE`, and flushes per line into a
   pipe. A write of the same value produces no event, so the daemon's rewrites of an unchanged position don't wake
   pyra-sound (verified 2026-11-13). `watch_mixer()` re-reads Handsfree / Headset on their events.
+- The popup shows the playing output's amp volume as a `Gtk.LevelBar` (read only, NEXT 2.5), fed by the same
+  reads as the tooltip. On the headphones with a daemon that doesn't drive them, the slider replaces it. The
+  LevelBar's default `low`/`high`/`full` offsets are removed (they colour a quiet setting as a warning).
 
 ### Wheel to headphones mapping (history, before NEXT 1.8)
 
