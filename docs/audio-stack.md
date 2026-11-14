@@ -59,42 +59,35 @@ Which one is running depends on the kernel:
 ## Volume wheel: pyra_volumed
 
 - Tapered pot on IIO `palmas-gpadc`, channel `voltage2`. Not an input device.
-- `pyra_volumed` (system service, pyra-hacks) polls it and writes only `Handsfree Playback Volume` on `hw:CARD=L15`.
-  It sets no routes and never touches `Headset Playback Volume`.
-- It overwrites manual writes to the Handsfree volume, even without the wheel moving (seen 2026-10-20 upstream).
-- So for this project the Handsfree volume is the wheel's position, read-only, and the headphone volume has to be
-  derived from it: watch Handsfree, write `Headset Playback Volume`. The two ranges differ (30 vs 16 steps,
-  -52..+6 vs -30..0 dB), so a mapping has to be chosen.
+- Two daemons exist, both called `pyra_volumed`, both a root system service that polls the pot:
+  - pyra-hacks' packaged `/usr/bin/pyra_volumed` writes only `Handsfree Playback Volume`. The headphones get no
+    wheel.
+  - dragonbox-pyra's calibrated one (`device/pyra-volumed/`, built to `/usr/local/bin/pyra_volumed` by
+    `pyra-volumed-run`, commit `177efeb` there) writes `Handsfree` and `Headset Playback Volume` from the same
+    wheel travel on every turn, whichever port plays (each amp sits behind its own route). Headset covers all 16
+    steps (0 at the bottom stop). This is the one on the test unit (since 2026-11-14).
+- Either overwrites manual writes to the Handsfree volume, even without the wheel moving (seen 2026-10-20
+  upstream). So Handsfree is read-only for us. A Headset write holds until the next wheel turn.
+- Since NEXT 1.8 (2026-11-14) pyra-sound never copies the wheel to the headphones; the daemon does.
+- Telling the two apart (`wheel_drives_headset()` in `src/pyra-sound`): find the process by `/proc/PID/comm` =
+  `pyra_volumed`, take the binary from `argv[0]` in `/proc/PID/cmdline` (`/proc/PID/exe` is root's and gives
+  EACCES to the session user), and look for the string `Headset Playback Volume` in it. Verified 2026-11-14:
+  the calibrated binary has it, the packaged one doesn't; `pyra-volumed-run` execs the absolute path, so argv[0]
+  is `/usr/local/bin/pyra_volumed`. No daemon, or one without the string: the popup shows its headphone volume
+  slider. Checked on every popup open, since the daemon can be rebuilt or restarted under a running session.
+- Change detection for the tooltip: `/usr/sbin/alsactl monitor hw:L15` (not on a user's PATH) prints one line per
+  control change, e.g. `node hw:L15, #30 (2,0,0,Handsfree Playback Volume,0) VALUE`, and flushes per line into a
+  pipe. A write of the same value produces no event, so the daemon's rewrites of an unchanged position don't wake
+  pyra-sound (verified 2026-11-13). `watch_mixer()` re-reads Handsfree / Headset on their events.
 
-### Wheel to headphones mapping
+### Wheel to headphones mapping (history, before NEXT 1.8)
 
-- Decided 2026-11-13: **linear step map**, `headset = round(handsfree * 15 / 29)` (`headset_for()` in
-  `src/pyra-sound`). The whole wheel travel moves the headphones, from -30 dB at the bottom to 0 dB at the top,
-  about 2 dB of headphone per 4 dB of speaker. The alternative, matching dB and clamping, leaves the bottom
-  (below -30 dB) and top (above 0 dB) of the wheel dead: about a third of the travel does nothing.
-- Wheel position at the bottom (HF 0) gives HS 0 = -30 dB, quiet but not silent. The TWL6040's Headset volume has
-  no mute step; use left click (PA mute) for silence.
-- Change detection: `/usr/sbin/alsactl monitor hw:L15` (not on a user's PATH) prints one line per control change,
-  e.g. `node hw:L15, #30 (2,0,0,Handsfree Playback Volume,0) VALUE`, and flushes per line into a pipe. A write
-  of the same value produces no event, so `pyra_volumed`'s rewrites of an unchanged position don't wake
-  pyra-sound (verified 2026-11-13).
-- pyra-sound copies only while PA's active port is `pyra-headphones` (read from PA on each event), and copies
-  at once when the port becomes the headphones. A port switch from outside (pactl, MATE's preferences) reaches it
-  through `pactl subscribe` (see "Following PulseAudio: pactl subscribe"). It also shows up as a
-  `Headset Left Playback` route event in the alsactl monitor; pyra-sound used that until NEXT 1.5.
-- The same monitor feeds the tooltip: pyra-sound re-reads `Handsfree` / `Headset Playback Volume` on their events.
-  After NEXT 1.8 the Handsfree and Headset events are still needed for that, so `watch_mixer()` stays, only
-  without the copy.
-- Verified on the unit 2026-11-13, with the user listening: the wheel from bottom to top and back gives HS 0..15
-  in step with HF, never going backwards, sometimes one event behind; HS stays put while the speakers are
-  selected.
-- HF never reads 1..5 on the unit: the wheel's bottom stop gives 0 and the next position about 6-7, and the top
-  jumps 26 → 29. That fits dragonbox-pyra's rewritten `pyra_volumed` (`device/pyra-volumed/pyra_volumed.c`,
-  `STEP_LO 6`, 0 only at `RAW_OFF`). So the HF-based mapping never reaches HS 1..3.
-- Planned (NEXT 1.8): move this into `pyra_volumed`. The daemon would write `Headset Playback Volume` from its
-  wheel `travel()` on every change, with no port check (the port paths route exclusively, so the headphone volume
-  only matters while it is routed). One ioctl instead of three subprocesses per step, all 16 steps reachable,
-  works without a session. Then the applet's mirror goes.
+- 2026-11-13 to 2026-11-14 pyra-sound itself copied the wheel: on each Handsfree event, with the
+  `pyra-headphones` port active, it wrote `Headset = round(handsfree * 15 / 29)` (linear step map, chosen over a
+  dB match that would leave a third of the travel dead). HF never reads 1..5 on the unit (`STEP_LO 6` in the
+  calibrated daemon), so HS 1..3 were unreachable, and each step cost three subprocesses. That is why it moved
+  into the daemon, which maps its own wheel travel onto all 16 Headset steps.
+- The TWL6040's Headset volume has no mute step (HS 0 = -30 dB); use left click (PA mute) for silence.
 
 ## Following PulseAudio: pactl subscribe
 
@@ -148,6 +141,6 @@ Which one is running depends on the kernel:
   headphones port is active and not muted; muted is `audio-volume-muted` on either output (user's choice
   2026-11-13).
 - pyra-sound's tooltip is `Speakers: N%` / `Headphones: N%` / `<output>: muted`. N is the amp volume as a share of
-  its steps: Handsfree/29 (the wheel) on the speakers, Headset/15 (the wheel's copy or the popup slider, same % as
-  the slider) on the headphones. The PA volume is left out and assumed to be 100%; when it isn't, the tooltip
+  its steps: Handsfree/29 (the wheel) on the speakers, Headset/15 (the wheel through the calibrated daemon, or the popup slider,
+  same % as the slider) on the headphones. The PA volume is left out and assumed to be 100%; when it isn't, the tooltip
   adds `(PulseAudio N%)` (user 2026-11-13: the wheel's volume is what counts).
