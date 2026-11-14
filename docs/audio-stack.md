@@ -130,6 +130,9 @@ Which one is running depends on the kernel:
   mate-session honours the mask (`Hidden=true` in `/etc/xdg/pyra/autostart`); after a fresh login only pyra-sound
   runs, and after `apt remove` (symlink and the then-empty `/etc/xdg/pyra/autostart` gone) MATE's icon is back at
   the next login. The running MATE icon stays until logout.
+- Per user, a copy of `/etc/xdg/autostart/pyra-sound.desktop` with `Hidden=true` appended in `~/.config/autostart`
+  stops pyra-sound at the next login while MATE's stays masked: no sound icon at all, nothing in `~/.xsession-errors`.
+  Removing the copy brings pyra-sound back (verified on the unit 2026-11-14, NEXT 1.10; README's instructions).
 - Our own `/etc/xdg/autostart/pyra-sound.desktop` is a conffile and survives `apt remove` (state `rc`). Without
   `TryExec=pyra-sound`, mate-session logs `Could not launch application 'pyra-sound.desktop'` to
   `~/.xsession-errors` at every login after removal; the entry carries `TryExec` for that.
