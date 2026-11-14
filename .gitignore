@@ -7,3 +7,4 @@ __pycache__/
 PROMPT.md
 PROGRESS.md
 NEXT.md
+scripts/claude-loop.sh
