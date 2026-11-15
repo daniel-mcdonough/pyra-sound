@@ -52,3 +52,6 @@ run `! sudo systemctl start docker`. For a script-only change, `scp` + `sudo ins
 history rewrite), delete the GitHub release first (web UI; `gh` isn't logged in on the host), then
 `git push origin :refs/tags/vX` and push the tag again. `git filter-repo` drops `origin`; add it back before pushing.
 Workflow runs and releases can be read without auth while the repo is public (a private repo gives 404, S13): `curl -s https://api.github.com/repos/<owner>/pyra-sound/actions/runs` (owner from `git remote -v`).
+
+Waiting on a build: `until ! pgrep -f build-deb.sh; do sleep 3; done` matches its own `bash -c` command line and
+never ends (S15). Run the build itself with `run_in_background` and wait for its notification.
