@@ -71,7 +71,7 @@ Which one is running depends on the kernel:
 - Either overwrites manual writes to the Handsfree volume, even without the wheel moving (seen 2026-10-20
   upstream). So Handsfree is read-only for us. A Headset write holds until the next wheel turn.
 - Since NEXT 1.8 (2026-11-14) pyra-sound never copies the wheel to the headphones; the daemon does.
-- Telling the two apart (`wheel_drives_headset()` in `src/pyra-sound`): find the process by `/proc/PID/comm` =
+- Telling the two apart (`read_wheel()` and `volumed_binary()` in `src/pyra-sound`): find the process by `/proc/PID/comm` =
   `pyra_volumed`, take the binary from `argv[0]` in `/proc/PID/cmdline` (`/proc/PID/exe` is root's and gives
   EACCES to the session user), and look for `Headset Playback Volume` (calibrated build, full control name) or
   `\0Headset\0` (pyra-hacks, which uses the simple mixer API, element names `Handsfree` / `Headset`, so the
@@ -83,9 +83,29 @@ Which one is running depends on the kernel:
   control change, e.g. `node hw:L15, #30 (2,0,0,Handsfree Playback Volume,0) VALUE`, and flushes per line into a
   pipe. A write of the same value produces no event, so the daemon's rewrites of an unchanged position don't wake
   pyra-sound (verified 2026-11-13). `watch_mixer()` re-reads Handsfree / Headset on their events.
-- The popup shows the playing output's amp volume as a `Gtk.LevelBar` (read only, NEXT 2.5), fed by the same
-  reads as the tooltip. On the headphones with a daemon that doesn't drive them, the slider replaces it. The
+- The popup shows the volume as a `Gtk.LevelBar` (read only, NEXT 2.5), fed by the same reads as the tooltip. On the headphones with a daemon that doesn't drive them, the slider replaces it. The
   LevelBar's default `low`/`high`/`full` offsets are removed (they colour a quiet setting as a warning).
+
+### One volume: the wheel's position (NEXT 2.6)
+
+- Tooltip and bar show where the wheel is, not each amp's step over its full range (that gave 41% on the speakers
+  and 53% on the headphones at one wheel position, and the speakers never passed 66% with `range 5 19`).
+  `volume()` in `src/pyra-sound`: `(Handsfree - lo) / (hi - lo)`, clamped to 0..1.
+- Computed from **Handsfree**, on both outputs: every daemon writes it, on every turn, whichever port plays, so
+  one value gives one number. Headset is only written by the newer daemons and has its own span (`hsrange`).
+  Off (wheel at the bottom stop) writes 0 to both controls, below `lo`, so it reads 0%.
+- The span `(lo, hi)` comes from the running daemon (`read_wheel()`, on start and each popup open):
+  - pyra-hacks from `0.38+pyra1` (binary contains `/etc/pyra_volumed.conf`): default 6..29, overridden by
+    `range lo hi` lines in `/etc/pyra_volumed.conf`. The daemon parses ` range %ld %ld`, keeps the last line with
+    `0 <= lo < hi <= 29`, ignores the rest; pyra-sound does the same. `hsrange` is for Headset and not needed.
+    The file is `0644 root` on the unit (readable by the session user): `cal 16 193 402 935 2067`,
+    `hsrange 0 15`, `range 5 19` (2026-11-14).
+  - dragonbox-pyra's calibrated build: hard-coded `{6, 29}` / `{0, 15}` in its `CONTROLS[]`; it reads no config.
+  - Stock pyra-hacks up to 0.38: `raw * max / 2052`, the whole 0..29, no config. No daemon: 0..29 too.
+- The daemon reads its config only at start, so an edited `range` without a daemon restart is shown wrongly
+  (clamped) until the daemon restarts.
+- Headphones with a daemon that doesn't drive them: the tooltip shows the slider's value (Headset/15) and the
+  slider replaces the bar.
 
 ### Wheel to headphones mapping (history, before NEXT 1.8)
 
@@ -173,9 +193,9 @@ Which one is running depends on the kernel:
 - MATE's icons don't show the output. pyra-sound shows the theme's `audio-headphones` (in theme `mate`) while the
   headphones port is active and not muted; muted is `audio-volume-muted` on either output (user's choice
   2026-11-13).
-- pyra-sound's tooltip is `Speakers: N%` / `Headphones: N%` / `<output>: muted`. N is the amp volume as a share of
-  its steps: Handsfree/29 (the wheel) on the speakers, Headset/15 (the wheel through the calibrated daemon, or the popup slider,
-  same % as the slider) on the headphones. The PA volume is left out and assumed to be 100%; when it isn't, the tooltip
+- pyra-sound's tooltip is `Speakers: N%` / `Headphones: N%` / `<output>: muted`. N is the wheel's position, the
+  same on both outputs (see "One volume" above), or on the headphones without a daemon driving them, the slider's
+  Headset/15. The PA volume is left out and assumed to be 100%; when it isn't, the tooltip
   adds `(PulseAudio N%)` (user 2026-11-13: the wheel's volume is what counts).
 - No scroll on the icon (user's decision 2026-11-14, NEXT 2.2). Scroll can't move the wheel's volume
   (`pyra_volumed` overwrites Handsfree), so it could only step the `aess` PA software volume, a second volume in

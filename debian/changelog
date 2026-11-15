@@ -1,3 +1,12 @@
+pyra-sound (0.4) trixie; urgency=medium
+
+  * The tooltip and the bar show one volume, the wheel's position, the same
+    on the speakers and the headphones: 0% at the bottom stop, 100% at the
+    top. The speaker range comes from the running pyra_volumed (range in
+    /etc/pyra_volumed.conf for pyra-hacks' daemon).
+
+ -- pyra-sound maintainers <pyra-sound@example.invalid>  Sat, 14 Nov 2026 23:30:00 +0000
+
 pyra-sound (0.3) trixie; urgency=medium
 
   * The right-click window shows the playing output's volume as a read-only

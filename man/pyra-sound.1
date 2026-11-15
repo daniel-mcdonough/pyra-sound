@@ -9,12 +9,13 @@ puts a sound icon in MATE's Notification Area, in place of
 .BR mate-volume-control-status-icon .
 A left click mutes and unmutes the sound. A right click opens a small window
 to choose between the speakers and the headphones, with a bar showing the
-volume of the output that plays; it closes on a click outside it or on
+volume; it closes on a click outside it or on
 Escape.
 .PP
 The icon shows MATE's volume icon on the speakers, a headphones picture on
 the headphones, and the muted icon on either when muted. The tooltip names
-the output and the amplifier volume, and adds PulseAudio's volume when that
+the output and the volume, which is the wheel's position (0% at the bottom,
+100% at the top, the same on both outputs), and adds PulseAudio's volume when that
 is not 100%.
 .PP
 The volume wheel is handled by the

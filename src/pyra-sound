@@ -65,13 +65,14 @@ HANDSFREE_VOLUME = "Handsfree Playback Volume"
 HANDSFREE_MAX = 29
 
 
-def wheel_drives_headset():
-    """True if a running pyra_volumed writes the headphone volume. Its
-    process is root's, so /proc/PID/exe is closed to us; take the binary from
-    argv[0] and look for the control's name in it: the full name in
-    dragonbox-pyra's build, the simple mixer element "Headset" in pyra-hacks'
-    (0.38+pyra2 on) (docs/audio-stack.md, "Volume wheel: pyra_volumed")."""
-    needles = (HEADSET_VOLUME.encode(), b"\0Headset\0")
+# pyra_volumed's settings file (pyra-hacks' builds from 0.38+pyra1). Its
+# "range lo hi" lines say which Handsfree steps the wheel spans.
+VOLUMED_CONFIG = "/etc/pyra_volumed.conf"
+
+
+def volumed_binary():
+    """The running pyra_volumed's binary, or None. Its process is root's, so
+    /proc/PID/exe is closed to us; take the path from argv[0]."""
     for pid in filter(str.isdigit, os.listdir("/proc")):
         try:
             with open(f"/proc/{pid}/comm") as f:
@@ -81,12 +82,58 @@ def wheel_drives_headset():
                 argv0 = f.read().split(b"\0")[0].decode()
             path = argv0 if "/" in argv0 else shutil.which(argv0)
             with open(path, "rb") as f:
-                binary = f.read()
-            if any(n in binary for n in needles):
-                return True
+                return f.read()
         except (OSError, TypeError, UnicodeDecodeError):
             continue
-    return False
+    return None
+
+
+def config_range(lo, hi):
+    """The Handsfree span from VOLUMED_CONFIG's "range lo hi" lines, read the
+    way pyra_volumed reads them: the last valid one wins, invalid ones are
+    ignored, no file leaves the defaults."""
+    try:
+        with open(VOLUMED_CONFIG) as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        return lo, hi
+    except OSError as e:
+        log(f"{VOLUMED_CONFIG}: {e.strerror}; assuming range {lo} {hi}")
+        return lo, hi
+    for line in lines:
+        words = line.split()
+        if len(words) < 3 or words[0] != "range":
+            continue
+        try:
+            a, b = int(words[1]), int(words[2])
+        except ValueError:
+            continue
+        if 0 <= a < b <= HANDSFREE_MAX:
+            lo, hi = a, b
+    return lo, hi
+
+
+def read_wheel():
+    """What the running pyra_volumed does with the wheel: whether it drives
+    the headphones, and the Handsfree steps (lo, hi) its travel spans, which
+    turn a Handsfree reading back into the wheel's position.
+
+    The headphones: the full control name is in dragonbox-pyra's build, the
+    simple mixer element "Headset" in pyra-hacks' (0.38+pyra2 on). The span:
+    pyra-hacks' builds that read VOLUMED_CONFIG default to 6..29, so does
+    dragonbox-pyra's (hard-coded); stock 0.38 maps the wheel onto 0..29 (see
+    docs/audio-stack.md, "Volume wheel: pyra_volumed")."""
+    binary = volumed_binary()
+    if binary is None:
+        return False, (0, HANDSFREE_MAX)
+    drives = any(n in binary for n in (HEADSET_VOLUME.encode(), b"\0Headset\0"))
+    if VOLUMED_CONFIG.encode() in binary:
+        span = config_range(6, HANDSFREE_MAX)
+    elif HEADSET_VOLUME.encode() in binary:
+        span = (6, HANDSFREE_MAX)
+    else:
+        span = (0, HANDSFREE_MAX)
+    return drives, span
 
 
 def amixer_value(out):
@@ -180,6 +227,8 @@ class PyraSound(Gtk.Application):
         self.refresh_queued = False
         self.pa = (False, 100, None)  # PA's mute, volume and port
         self.amp = {}             # amp volume control -> its last value
+        self.drives_headset = True  # pyra_volumed drives the headphones
+        self.span = (0, HANDSFREE_MAX)  # Handsfree steps the wheel spans
 
     def do_startup(self):
         Gtk.Application.do_startup(self)
@@ -193,7 +242,8 @@ class PyraSound(Gtk.Application):
         self.refresh()
         self.read_amp(HANDSFREE_VOLUME)
         self.read_amp(HEADSET_VOLUME)
-        if not wheel_drives_headset():
+        self.check_wheel()
+        if not self.drives_headset:
             log("pyra_volumed doesn't drive the headphones; "
                 "the popup gets a headphone volume slider")
         self.watch_mixer()
@@ -224,6 +274,29 @@ class PyraSound(Gtk.Application):
             self.popup.close()
         else:
             self.popup.open()
+
+    def check_wheel(self):
+        """Look at the running pyra_volumed again: it can be swapped,
+        restarted or given a new range under a running session. Done at
+        start and on every popup open, not on every wheel event."""
+        self.drives_headset, self.span = read_wheel()
+        self.show(*self.pa)
+
+    def volume(self):
+        """The loudness as a share of 0..1, or None before the first read.
+        Normally the wheel's position, the same on both outputs: Handsfree
+        follows the wheel on every turn whichever port plays, and every
+        pyra_volumed writes it, so it is read back through the daemon's span
+        (off writes 0, below lo, so the bottom stop is 0). On the headphones
+        with a daemon that doesn't drive them, the popup slider's value."""
+        if self.pa[2] == HEADPHONES and not self.drives_headset:
+            value = self.amp.get(HEADSET_VOLUME)
+            return None if value is None else value / HEADSET_MAX
+        value = self.amp.get(HANDSFREE_VOLUME)
+        if value is None:
+            return None
+        lo, hi = self.span
+        return min(1, max(0, (value - lo) / (hi - lo)))
 
     def set_port(self, port):
         run(["pactl", "set-sink-port", SINK, port], lambda ok, out: self.refresh())
@@ -340,23 +413,21 @@ class PyraSound(Gtk.Application):
         self.icon.set_from_icon_name(icon_for(muted, percent, port))
         if port in PORT_NAMES:
             self.popup.show_port(port)
-        # The loudness is the amp's volume, set by the wheel (or, on the
-        # headphones with an older pyra_volumed, by the popup's slider). PA's volume normally stays at 100%, so
-        # it's only worth mentioning when someone has moved it.
-        if port == HEADPHONES:
-            output, control, top = "Headphones", HEADSET_VOLUME, HEADSET_MAX
-        else:
-            output, control, top = "Speakers", HANDSFREE_VOLUME, HANDSFREE_MAX
+        # The loudness is the wheel's position (or, on the headphones with an
+        # older pyra_volumed, the popup's slider). PA's volume normally stays
+        # at 100%, so it's only worth mentioning when someone has moved it.
+        output = "Headphones" if port == HEADPHONES else "Speakers"
+        volume = self.volume()
         if muted:
             text = f"{output}: muted"
-        elif control in self.amp:
-            text = f"{output}: {round(self.amp[control] * 100 / top)}%"
+        elif volume is not None:
+            text = f"{output}: {round(volume * 100)}%"
         else:
             text = output
         if not muted and percent != 100:
             text += f" (PulseAudio {percent}%)"
         self.icon.set_tooltip_text(text)
-        self.popup.show_level(port == HEADPHONES, output, self.amp.get(control), top)
+        self.popup.show_level(port == HEADPHONES, volume)
 
 
 class Popup(Gtk.Window):
@@ -374,7 +445,6 @@ class Popup(Gtk.Window):
         self.updating = False     # set while we move the widgets ourselves
         self.hs_pending = None    # headset value waiting to be written
         self.hs_busy = False      # an amixer write is running
-        self.wheel = True         # pyra_volumed drives the headphones
         self.level_on_hp = False  # the bar shows the headphones' level
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6,
@@ -385,10 +455,10 @@ class Popup(Gtk.Window):
         for button, port in ((self.speaker, SPEAKER), (self.headphones, HEADPHONES)):
             button.connect("toggled", self.on_port_toggled, port)
             box.pack_start(button, False, False, 0)
-        # The wheel's volume on the active output. A LevelBar, not a Scale:
+        # The wheel's position, the same on both outputs. A LevelBar, not a Scale:
         # Handsfree is pyra_volumed's alone, and dragging would fight it.
         self.level = [Gtk.Separator(), Gtk.Box(spacing=6)]
-        self.level_label = Gtk.Label(xalign=0)
+        self.level_label = Gtk.Label(label="Volume", xalign=0)
         self.level_value = Gtk.Label(xalign=1)
         self.level[1].pack_start(self.level_label, True, True, 0)
         self.level[1].pack_start(self.level_value, False, False, 0)
@@ -428,8 +498,8 @@ class Popup(Gtk.Window):
 
     def open(self):
         self.app.refresh()
-        # Checked on every open: pyra_volumed can be swapped or restarted.
-        wheel = self.wheel = wheel_drives_headset()
+        self.app.check_wheel()
+        wheel = self.app.drives_headset
         for widget in self.slider:
             widget.set_visible(not wheel)
         self.update_level_visibility()
@@ -489,21 +559,20 @@ class Popup(Gtk.Window):
         (self.headphones if port == HEADPHONES else self.speaker).set_active(True)
         self.updating = False
 
-    def show_level(self, on_hp, output, value, top):
-        """The active output's amp volume, as the tooltip has it."""
+    def show_level(self, on_hp, volume):
+        """The volume (0..1 or None), as the tooltip has it."""
         self.level_on_hp = on_hp
-        self.level_label.set_text(f"{output} volume")
-        if value is None:
+        if volume is None:
             self.bar.set_value(0)
             self.level_value.set_text("?")
         else:
-            self.bar.set_value(value / top)
-            self.level_value.set_text(f"{round(value * 100 / top)}%")
+            self.bar.set_value(volume)
+            self.level_value.set_text(f"{round(volume * 100)}%")
         self.update_level_visibility()
 
     def update_level_visibility(self):
         # On the headphones without the wheel, the slider shows that level.
-        visible = self.wheel or not self.level_on_hp
+        visible = self.app.drives_headset or not self.level_on_hp
         if visible != self.bar.get_visible():
             for widget in self.level:
                 widget.set_visible(visible)

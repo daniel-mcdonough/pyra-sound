@@ -47,20 +47,22 @@ To upgrade, install the newer `.deb` the same way. To remove it:
 | Input | Does |
 | --- | --- |
 | Left click | Mute / unmute |
-| Right click | Open a small window: *Speakers* or *Headphones*, and a bar with the playing output's volume (or a headphone volume slider, see below). Click outside it or press Escape to close. |
+| Right click | Open a small window: *Speakers* or *Headphones*, and a bar with the volume (or a headphone volume slider, see below). Click outside it or press Escape to close. |
 | Volume wheel | Volume of both outputs, through `pyra_volumed` |
 
 The **icon** is MATE's own volume icon while the speakers play, a headphones
 picture while the headphones play, and the muted icon on either output when
 muted.
 
-The **tooltip** names the output and its volume, for example
-`Speakers: 62%` or `Headphones: muted`. The percentage is the amplifier's
-volume, the one the wheel moves. PulseAudio's volume normally stays at 100%;
+The **tooltip** names the output and the volume, for example
+`Speakers: 62%` or `Headphones: muted`. The percentage is where the wheel
+is: 0% at the bottom stop, 100% at the top, the same on the speakers and the
+headphones (with a daemon that doesn't drive the headphones, the headphone
+slider's value while they play). PulseAudio's volume normally stays at 100%;
 if something else (a volume control, a media key) moves it, the tooltip adds
 it, as in `Speakers: 62% (PulseAudio 40%)`.
 
-The **bar** in the right-click window shows the same amplifier volume as the
+The **bar** in the right-click window shows the same volume as the
 tooltip and follows the wheel while the window is open. It is read only: the
 wheel's daemon owns that volume.
 
@@ -83,7 +85,9 @@ are two daemons by that name:
 The slider sets the headphone amplifier directly. With the calibrated daemon
 a slider value would only hold until the next turn of the wheel, which is why
 the slider only shows when the wheel doesn't reach the headphones. pyra-sound
-checks which daemon runs each time the window opens.
+checks which daemon runs each time the window opens, and reads the wheel's
+speaker range (`range lo hi` in `/etc/pyra_volumed.conf`, for pyra-hacks'
+daemon) then too.
 
 The headphone amplifier has no silent step; its lowest setting is quiet, not
 off. Use left click to mute.
